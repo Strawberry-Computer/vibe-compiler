@@ -42,6 +42,7 @@ const parseArgs = () => {
     apiUrl: process.env.VIBEC_API_URL || 'https://api.openai.com/v1',
     apiModel: process.env.VIBEC_API_MODEL || 'gpt-4',
     apiKey: process.env.VIBEC_API_KEY || '',
+    dryRun: process.env.VIBEC_DRY_RUN === 'true',
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -57,6 +58,8 @@ const parseArgs = () => {
       options.pluginTimeout = parseInt(arg.substring('--plugin-timeout='.length), 10);
     } else if (arg === '--no-overwrite') {
       options.noOverwrite = true;
+    } else if (arg === '--dry-run') {
+      options.dryRun = true;
     } else if (arg.startsWith('--api-url=')) {
       options.apiUrl = arg.substring('--api-url='.length);
     } else if (arg.startsWith('--api-model=')) {
@@ -73,6 +76,7 @@ Options:
   --retries=<number>      Number of retries for failed tests (default: 0)
   --plugin-timeout=<ms>   Timeout for JS plugins in milliseconds (default: 10000)
   --no-overwrite          Fail if output/current/ files would be overwritten
+  --dry-run               Run in demo mode without API key (no actual LLM calls)
   --api-url=<url>         LLM API endpoint URL
   --api-model=<model>     LLM model to use
   --help, -h              Show this help message
@@ -86,6 +90,7 @@ Environment Variables:
   VIBEC_API_URL           Same as --api-url
   VIBEC_API_MODEL         Same as --api-model
   VIBEC_API_KEY           API key for LLM service
+  VIBEC_DRY_RUN           Same as --dry-run
   VIBEC_DEBUG             Enable debug logging
       `);
       process.exit(0);
@@ -129,7 +134,9 @@ const getPromptFiles = async (stacks) => {
       const mdFiles = files.filter(file => file.endsWith('.md'));
       
       for (const file of mdFiles) {
-        const match = file.match(/^(\d+)_/);
+        // More flexible pattern matching for filenames
+        // Accept formats like: 001_name.md, 1_name.md, 1-name.md, 0001-name.md
+        const match = file.match(/^(\d+)[\-_]/);
         if (match) {
           prompts.push({
             stack,
@@ -286,9 +293,13 @@ const runTests = async (testCmd) => {
 // Process an LLM request using OpenAI-compatible API
 const processLlmRequest = async (prompt, options) => {
   if (!options.apiKey) {
-    log.warn('No API key provided. Using prompt parsing only (demo mode).');
-    log.warn('Set VIBEC_API_KEY environment variable for full functionality.');
-    return prompt;
+    if (options.dryRun) {
+      log.info('Running in dry-run mode. No LLM API calls will be made.');
+      log.info('Output files will be created based on prompt parsing only.');
+      return prompt;
+    } else {
+      throw new Error('No API key provided. Set VIBEC_API_KEY environment variable or use --dry-run for demo mode.');
+    }
   }
 
   log.info(`Processing prompt with LLM (${prompt.length} chars)`);
@@ -467,6 +478,7 @@ const main = async () => {
     apiUrl: cliArgs.apiUrl || config.apiUrl || 'https://api.openai.com/v1',
     apiModel: cliArgs.apiModel || config.apiModel || 'gpt-4',
     apiKey: process.env.VIBEC_API_KEY || '',
+    dryRun: cliArgs.dryRun || (config.dryRun === true),
     pluginParams: config.pluginParams || {}
   };
   
@@ -565,12 +577,7 @@ const main = async () => {
         llmResponse = await processLlmRequest(finalPrompt, options);
       } catch (err) {
         log.error(`LLM request failed: ${err.message}`);
-        if (!options.apiKey) {
-          log.info('Falling back to prompt parsing for demo mode');
-          llmResponse = finalPrompt;
-        } else {
-          continue; // Skip this prompt if LLM request failed
-        }
+        continue; // Skip this prompt if LLM request failed
       }
       
       // Parse output sections
