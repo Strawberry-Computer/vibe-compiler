@@ -3,8 +3,7 @@
   "testCmd": "npm test",
   "retries": 2,
   "pluginTimeout": 5000,
-  "apiUrl": "https://api.openai.com/v1",
-  "apiModel": "gpt-4",
+  "apiModel": "anthropic/claude-3.7-sonnet",
   "pluginParams": {
     "dump_files": {
       "files": ["bin/vibec.js", "bootstrap.js"]

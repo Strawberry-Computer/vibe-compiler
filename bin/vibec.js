@@ -308,7 +308,7 @@ const processLlmRequest = async (prompt, options) => {
 
   log.info(`Processing prompt with LLM (${prompt.length} chars)`);
   
-  const url = new URL('/chat/completions', options.apiUrl);
+  const url = new URL(`${options.apiUrl}/chat/completions`);
   const isHttps = url.protocol === 'https:';
   const client = isHttps ? https : http;
   
