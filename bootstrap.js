@@ -66,6 +66,19 @@ async function checkForGeneratedVibec(stageNum) {
 }
 
 /**
+ * Extract stage number from filename using more flexible pattern matching
+ * Accepts formats like: 001_name.md, 1_name.md, 1-name.md, 0001-name.md
+ */
+function extractStageNumber(filename) {
+  // Match any digit sequence at the start of the filename
+  const match = filename.match(/^(\d+)[\-_]/);
+  if (match) {
+    return parseInt(match[1], 10);
+  }
+  return null;
+}
+
+/**
  * Get the highest stage number from stacks
  */
 async function getHighestStage() {
@@ -79,19 +92,28 @@ async function getHighestStage() {
       
       for (const file of files) {
         if (file.endsWith('.md')) {
-          const match = file.match(/^(\d+)_/);
-          if (match) {
-            const stage = parseInt(match[1], 10);
+          const stage = extractStageNumber(file);
+          if (stage !== null) {
             highestStage = Math.max(highestStage, stage);
           }
         }
       }
     } catch (err) {
       // Stack dir doesn't exist, which is fine
+      log.debug(`Stack directory '${stack}' doesn't exist: ${err.message}`);
     }
   }
   
   return highestStage;
+}
+
+/**
+ * Check if a file belongs to a specific stage number
+ * More flexible matching for different filename formats
+ */
+function isFileForStage(filename, stage) {
+  const stageNumber = extractStageNumber(filename);
+  return stageNumber === stage;
 }
 
 /**
@@ -130,7 +152,10 @@ async function runVibecForStage(vibecPath, stage, config) {
       log.debug(`Checking directory: ${stackDir}`);
       
       const files = await fs.readdir(stackDir);
-      const stagePrompts = files.filter(file => file.startsWith(`${stage}_`) && file.endsWith('.md'));
+      // Updated filtering to use the more flexible matching
+      const stagePrompts = files.filter(file => 
+        file.endsWith('.md') && isFileForStage(file, stage)
+      );
       
       if (stagePrompts.length > 0) {
         filteredStacks.push(stack);
@@ -175,6 +200,33 @@ async function runVibecForStage(vibecPath, stage, config) {
 }
 
 /**
+ * Debug function to list all available prompt files
+ */
+async function listAvailablePrompts(config) {
+  log.debug('Scanning for all available prompt files:');
+  
+  for (const stack of config.stacks) {
+    try {
+      const stackDir = path.join('stacks', stack);
+      const files = await fs.readdir(stackDir);
+      const promptFiles = files.filter(file => file.endsWith('.md'));
+      
+      if (promptFiles.length > 0) {
+        log.debug(`Stack '${stack}' has ${promptFiles.length} prompt files:`);
+        for (const file of promptFiles) {
+          const stage = extractStageNumber(file);
+          log.debug(`  - ${file} (Stage: ${stage !== null ? stage : 'unknown'})`);
+        }
+      } else {
+        log.debug(`Stack '${stack}' has no prompt files`);
+      }
+    } catch (err) {
+      log.debug(`Cannot access stack '${stack}': ${err.message}`);
+    }
+  }
+}
+
+/**
  * Main bootstrap function
  */
 async function bootstrap() {
@@ -195,6 +247,11 @@ async function bootstrap() {
     log.debug(`Config: ${JSON.stringify(config, null, 2)}`);
   } catch (err) {
     log.warn(`No vibec.json found, using default configuration`);
+  }
+  
+  // List all available prompts if in debug mode
+  if (process.env.VIBEC_DEBUG) {
+    await listAvailablePrompts(config);
   }
   
   // Find the initial vibec implementation

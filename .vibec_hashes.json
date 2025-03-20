@@ -1,11 +1,11 @@
 {
   "core/001_cli.md": {
-    "hash": "12345abcdef",
+    "hash": "4ce7814cfad1284a3c515f31bc498749",
     "success": true,
     "testResult": {
       "success": true,
       "errorCode": 0,
-      "stdout": "Tests passed",
+      "stdout": "\n> vibec@1.0.0 test\n> echo \"No tests configured yet\" && exit 0\n\nNo tests configured yet\n",
       "stderr": ""
     }
   }
