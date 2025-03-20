@@ -22,6 +22,7 @@ const log = {
   success: (msg) => console.log(`${colors.green}✅ ${msg}${colors.reset}`),
   warn: (msg) => console.log(`${colors.yellow}⚠️  ${msg}${colors.reset}`),
   error: (msg) => console.log(`${colors.red}❌ ${msg}${colors.reset}`),
+  debug: (msg) => process.env.VIBEC_DEBUG && console.log(`${colors.dim}🔍 ${msg}${colors.reset}`),
   highlight: (msg) => `${colors.bright}${msg}${colors.reset}`
 };
 
@@ -121,25 +122,35 @@ async function runVibecForStage(vibecPath, stage, config) {
   
   // Filter stacks to only include those with prompts for this stage
   const filteredStacks = [];
+  log.info(`Looking for stage ${stageStr} prompts in stacks: ${config.stacks.join(', ')}`);
+  
   for (const stack of config.stacks) {
     try {
-      const files = await fs.readdir(path.join('stacks', stack));
-      const hasStagePrompt = files.some(file => file.startsWith(`${stage}_`) && file.endsWith('.md'));
-      if (hasStagePrompt) {
+      const stackDir = path.join('stacks', stack);
+      log.debug(`Checking directory: ${stackDir}`);
+      
+      const files = await fs.readdir(stackDir);
+      const stagePrompts = files.filter(file => file.startsWith(`${stage}_`) && file.endsWith('.md'));
+      
+      if (stagePrompts.length > 0) {
         filteredStacks.push(stack);
+        log.info(`Found ${stagePrompts.length} prompts in ${stack} stack: ${stagePrompts.join(', ')}`);
+      } else {
+        log.debug(`No matching prompts found in ${stack} stack`);
       }
     } catch (err) {
-      // Stack dir doesn't exist
+      log.debug(`Error reading stack directory ${stack}: ${err.message}`);
     }
   }
   
   if (filteredStacks.length === 0) {
-    log.warn(`No prompts found for stage ${stageStr}, skipping`);
+    log.warn(`No prompts found for stage ${stageStr} in any stack, skipping`);
     return true;
   }
   
   // Override stacks with filtered ones
   cliArgs[0] = `--stacks=${filteredStacks.join(',')}`;
+  log.info(`Processing stage ${stageStr} with stacks: ${filteredStacks.join(', ')}`);
   
   // Make vibec executable
   try {
@@ -181,6 +192,7 @@ async function bootstrap() {
     const userConfig = JSON.parse(configData);
     config = { ...config, ...userConfig };
     log.success(`Loaded configuration from vibec.json`);
+    log.debug(`Config: ${JSON.stringify(config, null, 2)}`);
   } catch (err) {
     log.warn(`No vibec.json found, using default configuration`);
   }
