@@ -33,17 +33,7 @@ const log = {
 // Simple argument parser
 const parseArgs = () => {
   const args = process.argv.slice(2);
-  const options = {
-    stacks: (process.env.VIBEC_STACKS || 'core,generation,tests').split(','),
-    testCmd: process.env.VIBEC_TEST_CMD || 'npm test',
-    retries: parseInt(process.env.VIBEC_RETRIES || '0', 10),
-    pluginTimeout: parseInt(process.env.VIBEC_PLUGIN_TIMEOUT || '10000', 10),
-    noOverwrite: false,
-    apiUrl: process.env.VIBEC_API_URL || 'https://api.openai.com/v1',
-    apiModel: process.env.VIBEC_API_MODEL || 'gpt-4',
-    apiKey: process.env.VIBEC_API_KEY || '',
-    dryRun: process.env.VIBEC_DRY_RUN === 'true',
-  };
+  const options = {};
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -101,6 +91,20 @@ Environment Variables:
   }
   
   return options;
+};
+
+// Get environment variables
+const getEnvVars = () => {
+  return {
+    stacks: process.env.VIBEC_STACKS ? process.env.VIBEC_STACKS.split(',') : undefined,
+    testCmd: process.env.VIBEC_TEST_CMD,
+    retries: process.env.VIBEC_RETRIES !== undefined ? parseInt(process.env.VIBEC_RETRIES, 10) : undefined,
+    pluginTimeout: process.env.VIBEC_PLUGIN_TIMEOUT !== undefined ? parseInt(process.env.VIBEC_PLUGIN_TIMEOUT, 10) : undefined,
+    apiUrl: process.env.VIBEC_API_URL,
+    apiModel: process.env.VIBEC_API_MODEL,
+    apiKey: process.env.VIBEC_API_KEY || '',
+    dryRun: process.env.VIBEC_DRY_RUN === 'true',
+  };
 };
 
 // Load config from vibec.json if exists
@@ -462,25 +466,63 @@ const mergeStagesToCurrent = async (stacks) => {
 const main = async () => {
   log.info('Vibe Compiler (vibec) - Starting compilation process');
   
-  // Parse CLI args
+  // Parse CLI args (highest priority)
   const cliArgs = parseArgs();
   
-  // Load config
-  const config = await loadConfig();
+  // Get environment variables (medium priority)
+  const envVars = getEnvVars();
   
-  // Merge config with CLI args (CLI args take precedence)
+  // Load config file (lowest priority)
+  const configFile = await loadConfig();
+  
+  // Create default options with proper priority:
+  // 1. CLI args
+  // 2. Environment variables
+  // 3. Config file
+  // 4. Default values
   const options = {
-    stacks: cliArgs.stacks || config.stacks || ['core', 'generation', 'tests'],
-    testCmd: cliArgs.testCmd || config.testCmd || 'npm test',
-    retries: cliArgs.retries !== undefined ? cliArgs.retries : (config.retries || 0),
-    pluginTimeout: cliArgs.pluginTimeout || config.pluginTimeout || 10000,
-    noOverwrite: cliArgs.noOverwrite || false,
-    apiUrl: cliArgs.apiUrl || config.apiUrl || 'https://api.openai.com/v1',
-    apiModel: cliArgs.apiModel || config.apiModel || 'gpt-4',
-    apiKey: process.env.VIBEC_API_KEY || '',
-    dryRun: cliArgs.dryRun || (config.dryRun === true),
-    pluginParams: config.pluginParams || {}
+    // Default values
+    stacks: ['core', 'generation', 'tests'],
+    testCmd: 'npm test',
+    retries: 0,
+    pluginTimeout: 10000,
+    noOverwrite: false,
+    apiUrl: 'https://api.openai.com/v1',
+    apiModel: 'gpt-4',
+    apiKey: '',
+    dryRun: false,
+    pluginParams: {}
   };
+  
+  // Override with config file values (lowest priority)
+  if (configFile.stacks) options.stacks = configFile.stacks;
+  if (configFile.testCmd) options.testCmd = configFile.testCmd;
+  if (configFile.retries !== undefined) options.retries = configFile.retries;
+  if (configFile.pluginTimeout) options.pluginTimeout = configFile.pluginTimeout;
+  if (configFile.apiUrl) options.apiUrl = configFile.apiUrl;
+  if (configFile.apiModel) options.apiModel = configFile.apiModel;
+  if (configFile.dryRun !== undefined) options.dryRun = configFile.dryRun;
+  if (configFile.pluginParams) options.pluginParams = configFile.pluginParams;
+  
+  // Override with environment variables (medium priority)
+  if (envVars.stacks) options.stacks = envVars.stacks;
+  if (envVars.testCmd) options.testCmd = envVars.testCmd;
+  if (envVars.retries !== undefined) options.retries = envVars.retries;
+  if (envVars.pluginTimeout !== undefined) options.pluginTimeout = envVars.pluginTimeout;
+  if (envVars.apiUrl) options.apiUrl = envVars.apiUrl;
+  if (envVars.apiModel) options.apiModel = envVars.apiModel;
+  if (envVars.apiKey) options.apiKey = envVars.apiKey;
+  if (envVars.dryRun !== undefined) options.dryRun = envVars.dryRun;
+  
+  // Override with CLI args (highest priority)
+  if (cliArgs.stacks) options.stacks = cliArgs.stacks;
+  if (cliArgs.testCmd) options.testCmd = cliArgs.testCmd;
+  if (cliArgs.retries !== undefined) options.retries = cliArgs.retries;
+  if (cliArgs.pluginTimeout !== undefined) options.pluginTimeout = cliArgs.pluginTimeout;
+  if (cliArgs.noOverwrite !== undefined) options.noOverwrite = cliArgs.noOverwrite;
+  if (cliArgs.apiUrl) options.apiUrl = cliArgs.apiUrl;
+  if (cliArgs.apiModel) options.apiModel = cliArgs.apiModel;
+  if (cliArgs.dryRun !== undefined) options.dryRun = cliArgs.dryRun;
   
   // Check if current output would be overwritten
   await checkOverwrite(options.stacks, options.noOverwrite);
@@ -543,7 +585,7 @@ const main = async () => {
       
       // Create context for dynamic plugins
       const pluginContext = {
-        config: { ...config, pluginParams: options.pluginParams },
+        config: { ...configFile, pluginParams: options.pluginParams },
         stack: prompt.stack,
         promptNumber: prompt.number,
         promptContent,
