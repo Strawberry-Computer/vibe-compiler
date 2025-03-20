@@ -1,0 +1,24 @@
+{
+  "name": "vibec",
+  "version": "1.0.0",
+  "description": "Vibe Compiler - A self-compiling tool for LLM-powered code generation",
+  "main": "output/current/core/vibec.js",
+  "bin": {
+    "vibec": "output/current/core/vibec.js"
+  },
+  "scripts": {
+    "bootstrap": "node bootstrap.js",
+    "test": "echo \"No tests configured yet\" && exit 0"
+  },
+  "keywords": [
+    "compiler",
+    "llm",
+    "code-generation",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

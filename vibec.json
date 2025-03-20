@@ -1,0 +1,13 @@
+{
+  "stacks": ["core", "generation", "tests"],
+  "testCmd": "npm test",
+  "retries": 2,
+  "pluginTimeout": 5000,
+  "apiUrl": "https://api.openai.com/v1",
+  "apiModel": "gpt-4",
+  "pluginParams": {
+    "dump_files": {
+      "files": ["bin/vibec.js", "bootstrap.js"]
+    }
+  }
+}

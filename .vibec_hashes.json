@@ -1,0 +1,12 @@
+{
+  "core/001_cli.md": {
+    "hash": "12345abcdef",
+    "success": true,
+    "testResult": {
+      "success": true,
+      "errorCode": 0,
+      "stdout": "Tests passed",
+      "stderr": ""
+    }
+  }
+}
