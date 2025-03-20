@@ -47,9 +47,48 @@ Vibec uses a progressive bootstrapping approach:
 
 ### Installation
 
-1. Clone this repository
-2. Run `npm install` to set up the project
-3. Run `npm run bootstrap` to bootstrap the compiler
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/vgrichina/vibec.git
+   cd vibec
+   ```
+
+2. Install dependencies (minimal, only if needed):
+   ```bash
+   npm install
+   ```
+
+3. Set up your API key for LLM integration:
+   ```bash
+   export VIBEC_API_KEY=your_api_key_here
+   ```
+
+4. Run the bootstrap process:
+   ```bash
+   npm run bootstrap
+   # or directly
+   node bootstrap.js
+   ```
+
+### Bootstrap Process Explained
+
+The bootstrap process works as follows:
+
+1. It starts by using the implementation in `bin/vibec.js` (must exist)
+2. For each numerical stage (001, 002, etc.) in your stacks:
+   - It processes all prompts for that stage using the current best vibec
+   - After each stage, it checks if a new vibec was generated
+   - If a new implementation was created, it uses that for subsequent stages
+3. This allows vibec to evolve and improve itself throughout the compilation process
+
+### First-time Setup
+
+If you're setting up a new vibec project:
+
+1. Ensure you have the base implementation in `bin/vibec.js`
+2. Create your prompt stacks in the `stacks/` directory following the numerical prefix convention
+3. Create any plugins you need in `stacks/plugins/`
+4. Run the bootstrap process to generate the full implementation
 
 ### Usage
 
@@ -86,6 +125,7 @@ All configuration options can be set via environment variables:
 - `VIBEC_API_URL` - LLM API endpoint URL
 - `VIBEC_API_KEY` - API key for LLM service (preferred over config file for security)
 - `VIBEC_API_MODEL` - Model to use for code generation
+- `VIBEC_DEBUG` - Set to any value to enable debug logging
 
 ### LLM Integration
 
@@ -159,6 +199,25 @@ The progressive bootstrapping approach allows vibec to improve itself:
 3. Each stage can build on improvements from previous stages
 
 This creates a genuine self-improving system where the compiler evolves during the build process.
+
+## Troubleshooting
+
+### Common Issues
+
+- **API Key Not Found**: Make sure to set the `VIBEC_API_KEY` environment variable
+- **bootstrap.js fails**: Ensure `bin/vibec.js` exists and is executable
+- **Permission denied**: Run `chmod +x bin/vibec.js` to make the file executable
+- **No vibec found**: Check that the path to your vibec implementation is correct
+- **No output generated**: Verify that your prompt files follow the correct format with `## Output:` sections
+
+### Debug Mode
+
+Enable debug logging by setting the `VIBEC_DEBUG` environment variable:
+
+```bash
+export VIBEC_DEBUG=1
+node bootstrap.js
+```
 
 ## License
 
