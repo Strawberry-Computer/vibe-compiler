@@ -561,6 +561,7 @@ const main = async () => {
           dynamicContent.push(result);
         } catch (err) {
           log.error(`Error executing plugin ${name}: ${err.message}`);
+          throw new Error(`Plugin ${name} failed: ${err.message}`);
         }
       }
       
@@ -577,7 +578,7 @@ const main = async () => {
         llmResponse = await processLlmRequest(finalPrompt, options);
       } catch (err) {
         log.error(`LLM request failed: ${err.message}`);
-        continue; // Skip this prompt if LLM request failed
+        throw err; // Rethrow to stop the process
       }
       
       // Parse output sections
@@ -633,6 +634,7 @@ const main = async () => {
                 dynamicContent.push(result);
               } catch (err) {
                 log.error(`Error executing plugin ${name}: ${err.message}`);
+                throw new Error(`Plugin ${name} failed during retry: ${err.message}`);
               }
             }
             
@@ -656,8 +658,10 @@ const main = async () => {
               await writeOutputFiles(stageStackDir, retryOutputFiles);
             } catch (err) {
               log.error(`LLM retry request failed: ${err.message}`);
-              // Continue to next retry
+              throw err; // Rethrow to stop the process
             }
+          } else {
+            throw new Error(`Tests failed after ${options.retries + 1} attempts with exit code ${testResult.errorCode}`);
           }
         }
       }
