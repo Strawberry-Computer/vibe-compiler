@@ -11,17 +11,19 @@ A self-compiling tool to process vibe-coded projects using prompt stacks and LLM
 ```
 vibec/
 ├── bin/
-│   └── vibec.js            # Single, complete implementation
+│   ├── vibec.js            # Single, complete implementation
+│   └── test.sh             # Test script
 ├── bootstrap.js            # Progressive bootstrapping script
 ├── stacks/
 │   ├── core/               # Core functionality prompts
-│   │   ├── 001_cli.md
+│   │   ├── 001_initial_implementation.md  # Placeholder for base vibec.js
+│   │   ├── 002_add_logging.md
+│   │   ├── 003_add_plugins.md
 │   │   └── ...
-│   ├── generation/         # Code generation prompts
 │   ├── tests/              # Test generation prompts 
-│   └── plugins/            # Plugins for all stacks
-│       ├── coding_guidelines.md  # Static plugin
-│       └── dump_files.js         # Dynamic plugin
+│   └── plugins/            # User-defined plugins (after core support)
+│       ├── coding_guidelines.md  # Example static plugin
+│       └── dump_files.js         # Example dynamic plugin
 ├── output/
 │   ├── stages/             # Isolated stage outputs
 │   │   ├── 001/
@@ -36,12 +38,10 @@ vibec/
 ## Architecture
 
 Vibec uses a progressive bootstrapping approach:
-
-1. The bootstrap process starts with the base implementation (`bin/vibec.js`)
-2. Each numerical stage (001, 002, etc.) is processed in order
-3. After each stage, we check if a new vibec implementation was generated
-4. If a new implementation is available, it's used for subsequent stages
-5. This creates a self-improving cycle where vibec evolves during the build process
+1. Starts with the base implementation (`bin/vibec.js`).
+2. Processes each numerical stage (001, 002, etc.) in order.
+3. Checks for a new `vibec.js` after each stage and uses it for subsequent stages if generated.
+4. Creates a self-improving cycle where vibec evolves during the build.
 
 ## Getting Started
 
@@ -70,39 +70,32 @@ Vibec uses a progressive bootstrapping approach:
    node bootstrap.js
    ```
 
-### Bootstrap Process Explained
-
-The bootstrap process works as follows:
-
-1. It starts by using the implementation in `bin/vibec.js` (must exist)
-2. For each numerical stage (001, 002, etc.) in your stacks:
-   - It processes all prompts for that stage using the current best vibec
-   - After each stage, it checks if a new vibec was generated
-   - If a new implementation was created, it uses that for subsequent stages
-3. This allows vibec to evolve and improve itself throughout the compilation process
+   The bootstrap process:
+   - Starts with `bin/vibec.js` (must exist).
+   - Processes each stage (001, 002, etc.) using the current best `vibec.js`.
+   - Updates to a new implementation if generated, improving itself throughout.
 
 ### First-time Setup
 
-If you're setting up a new vibec project:
-
-1. Ensure you have the base implementation in `bin/vibec.js`
-2. Create your prompt stacks in the `stacks/` directory following the numerical prefix convention
-3. Create any plugins you need in `stacks/plugins/`
-4. Run the bootstrap process to generate the full implementation
+For a new vibec project:
+1. Ensure a base implementation exists in `bin/vibec.js`.
+2. Create prompt stacks in `stacks/` with numerical prefixes (e.g., `001_feature.md`).
+3. Add optional plugins in `stacks/plugins/` after plugin support is enabled.
+4. Run the bootstrap process to generate the full implementation.
 
 ### Usage
 
+Run vibec with:
 ```bash
-vibec --stacks core,generation,tests --test-cmd "npm test" --retries 2 --plugin-timeout 5000 --no-overwrite
+node bin/vibec.js --stacks core,tests --test-cmd "npm test" --retries 2 --plugin-timeout 5000 --no-overwrite
 ```
 
 ### Configuration
 
-You can configure vibec using a `vibec.json` file:
-
+Configure via `vibec.json`:
 ```json
 {
-  "stacks": ["core", "generation", "tests"],
+  "stacks": ["core", "tests"],
   "testCmd": "npm test",
   "retries": 2,
   "pluginTimeout": 5000,
@@ -116,103 +109,80 @@ You can configure vibec using a `vibec.json` file:
 
 ### Environment Variables
 
-All configuration options can be set via environment variables:
-
+Override config with:
 - `VIBEC_STACKS` - Comma-separated stack list
 - `VIBEC_TEST_CMD` - Test command
-- `VIBEC_RETRIES` - Number of retries for failed tests
-- `VIBEC_PLUGIN_TIMEOUT` - Timeout for JS plugins in milliseconds
-- `VIBEC_API_URL` - LLM API endpoint URL
-- `VIBEC_API_KEY` - API key for LLM service (preferred over config file for security)
-- `VIBEC_API_MODEL` - Model to use for code generation
-- `VIBEC_DEBUG` - Set to any value to enable debug logging
+- `VIBEC_RETRIES` - Number of retries
+- `VIBEC_PLUGIN_TIMEOUT` - JS plugin timeout (ms)
+- `VIBEC_API_URL` - LLM API endpoint
+- `VIBEC_API_KEY` - LLM API key (preferred over config)
+- `VIBEC_API_MODEL` - Model for code generation
+- `VIBEC_DEBUG` - Enable debug logging
 
 ### LLM Integration
 
-Vibec supports any OpenAI-compatible API, including:
-- OpenAI
-- OpenRouter
-- Claude API
-- Other compatible providers
-
-Configure the API endpoint using `apiUrl` in `vibec.json` or the `VIBEC_API_URL` environment variable. Provide your API key using the `VIBEC_API_KEY` environment variable (never store API keys in configuration files for security reasons).
+Supports OpenAI-compatible APIs (e.g., OpenAI, OpenRouter). Set `VIBEC_API_URL` and `VIBEC_API_KEY` (use env vars for security).
 
 ## Prompt Structure
 
-Prompts follow this format:
-
+Prompts use:
 ```markdown
 # Component Name
 
-Description of what should be generated.
+Description of what to generate.
 
 ## Context: file1.js, file2.js
 ## Output: path/to/output1.js
-## Output: path/to/output2.js
 ```
 
-- `## Context:` specifies files to include as context
-- `## Output:` defines where generated code should be saved (can have multiple)
+- `## Context:` - Files to include.
+- `## Output:` - Where to save generated code (multiple allowed).
 
 ## Plugin System
 
-### Static Plugins (.md)
-Create a Markdown file in `stacks/plugins/` with content that will be appended to each prompt.
-
-### Dynamic Plugins (.js)
-Create a JavaScript file in `stacks/plugins/` that exports an async function:
-
-```javascript
-module.exports = async (context) => {
-  // Generate dynamic content based on context
-  return "Generated content";
-};
-```
-
-The plugin context includes:
-```javascript
-{
-  config: { /* vibec.json config */ },
-  stack: "core",
-  promptNumber: 1,
-  promptContent: "# CLI Parser\n...",
-  workingDir: "/path/to/output/current",
-  testCmd: "npm test",
-  testResult: { errorCode: 1, stdout: "...", stderr: "..." } // Available during retries
-}
-```
+Plugin support is added via `stacks/core/003_add_plugins.md`. After this stage:
+- **Static Plugins (`.md`)**: Place in `stacks/<stack>/plugins/` (e.g., `stacks/core/plugins/coding_guidelines.md`). Their content appends to every prompt in the stack.
+- **Dynamic Plugins (`.js`)**: Place in `stacks/<stack>/plugins/` (e.g., `stacks/core/plugins/dump_files.js`). Export an async function:
+  ```javascript
+  module.exports = async (context) => {
+    return "Generated content";
+  };
+  ```
+  Context includes:
+  ```javascript
+  {
+    config: { /* vibec.json */ },
+    stack: "core",
+    promptNumber: 1,
+    promptContent: "# CLI Parser\n...",
+    workingDir: "/path/to/output/current",
+    testCmd: "npm test",
+    testResult: { errorCode: 1, stdout: "...", stderr: "..." } // Only during retries
+  }
+  ```
 
 ## Development
 
 ### Adding New Prompts
 
-1. Create a new prompt file in the appropriate stack (e.g., `stacks/core/003_feature.md`)
-2. Follow the naming convention: `NNN_name.md` where `NNN` is a numerical prefix
-3. Add output sections with `## Output: path/to/file.js` syntax
+1. Create a new file in a stack (e.g., `stacks/core/007_feature.md`).
+2. Use `NNN_name.md` naming with numerical prefix.
+3. Define outputs with `## Output: path/to/file.js`.
 
 ### Self-Improvement
 
-The progressive bootstrapping approach allows vibec to improve itself:
-
-1. Stage 001 uses the base implementation to generate initial components
-2. If stage 001 produces a new vibec, stage 002 uses that improved version
-3. Each stage can build on improvements from previous stages
-
-This creates a genuine self-improving system where the compiler evolves during the build process.
+Each stage builds on prior improvements, evolving `vibec.js` during compilation.
 
 ## Troubleshooting
 
 ### Common Issues
 
-- **API Key Not Found**: Make sure to set the `VIBEC_API_KEY` environment variable
-- **bootstrap.js fails**: Ensure `bin/vibec.js` exists and is executable
-- **Permission denied**: Run `chmod +x bin/vibec.js` to make the file executable
-- **No vibec found**: Check that the path to your vibec implementation is correct
-- **No output generated**: Verify that your prompt files follow the correct format with `## Output:` sections
+- **API Key Not Found**: Set `VIBEC_API_KEY`.
+- **bootstrap.js fails**: Ensure `bin/vibec.js` exists.
+- **Permission denied**: Run `chmod +x bin/vibec.js`.
+- **No output**: Check prompt format with `## Output:`.
 
 ### Debug Mode
-
-Enable debug logging by setting the `VIBEC_DEBUG` environment variable:
 
 ```bash
 export VIBEC_DEBUG=1
