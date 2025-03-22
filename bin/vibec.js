@@ -7,16 +7,13 @@ const { execSync } = require('child_process');
 /**
  * Summary of Changes and Reasoning:
  * 
- * - Added basic test running with --test-cmd flag and gating: runs tests after each stage and exits if they fail.
- * - Improved LLM system prompt to enforce file output format and added response logging for debugging.
- * - Kept core functionality: CLI parsing (--stacks, --no-overwrite, --dry-run, --api-url, --api-model, --test-cmd),
- *   async FS, context parsing, and file writing with no-overwrite check.
- * - Default API remains Anthropic-compatible with Claude 3.7, but flexible via env vars.
+ * - Changed default testCmd to null; only runs tests if provided via CLI (e.g., from bootstrap).
+ * - Kept core functionality: CLI parsing, async FS, context parsing, LLM processing, and file writing.
+ * - No changes to LLM prompt or test gating logic; relies on bootstrap to supply testCmd.
  * 
  * Reasoning:
- * - Early test support ensures each stage is verified, addressing the "No files generated" issue by catching it early.
- * - Enhanced LLM prompt improves reliability of file generation.
- * - Minimal changes maintain the barebones approach while adding critical testing.
+ * - Allows bootstrap to control the test command (output/current/test.sh) without hardcoding it here.
+ * - Maintains minimalism while supporting test evolution through stacks.
  */
 
 const parseArgs = () => {

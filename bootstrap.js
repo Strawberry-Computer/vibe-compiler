@@ -6,14 +6,14 @@ const { spawnSync } = require('child_process');
 /**
  * Summary of Changes and Reasoning:
  * 
- * - Updated to process both 'core' and 'tests' stacks by default (--stacks=core,tests).
- * - Runs each stage across all stacks, checking for new vibec.js after each stage.
- * - Simplified to pass test-cmd if provided, enabling gating in vibec.js.
- * - Kept async FS and minimal error handling.
+ * - Changed testCmd to use the absolute path to test.sh directly (e.g., "/path/to/test.sh") instead of "bash /path/to/test.sh".
+ * - Removed "bash" prefix since test.sh has a shebang (#!/bin/bash) and execSync can run it directly.
+ * - Kept initialization and self-improvement logic for vibec.js and test.sh.
  * 
  * Reasoning:
- * - Supports separate tests stack for early testing.
- * - Ensures stages are processed in order with test gating enforced by vibec.js.
+ * - execSync expects an executable path, not a shell command with arguments.
+ * - Simplifies execution, avoiding /bin/sh nesting issues and aligning with execSync's intent.
+ * - Ensures compatibility with test.sh's shebang for proper bash execution.
  */
 
 const getHighestStage = async (stacks = ['core', 'tests']) => {
@@ -34,22 +34,24 @@ const getHighestStage = async (stacks = ['core', 'tests']) => {
   return highest;
 };
 
-const checkNewVibec = async (stage) => {
-  const stagePath = path.join('output/stages', String(stage).padStart(3, '0'), 'vibec.js');
+const checkNewFile = async (stage, filename) => {
+  const stagePath = path.join('output/stages', String(stage).padStart(3, '0'), filename);
   try {
     await fs.access(stagePath);
-    console.log(`Found new vibec.js at ${stagePath}`);
+    console.log(`Found new ${filename} at ${stagePath}`);
     return stagePath;
   } catch (err) {
     return null;
   }
 };
 
-const runStage = (vibecPath, stage, testCmd) => {
+const runStage = (vibecPath, stage) => {
   const stageStr = String(stage).padStart(3, '0');
   console.log(`Running stage ${stageStr} with ${vibecPath}`);
-  const args = ['--stacks=core,tests'];
-  if (testCmd) args.push(`--test-cmd="${testCmd}"`);
+  const testPath = path.resolve('output/current/test.sh');
+  const testCmd = testPath; // Just the absolute path, no "bash" prefix
+  console.log(`Test command: ${testCmd}`);
+  const args = ['--stacks=core,tests', `--test-cmd="${testCmd}"`];
   const result = spawnSync('node', [vibecPath, ...args], { stdio: 'inherit' });
   if (result.status !== 0) {
     console.log(`Stage ${stageStr} failed with code ${result.status}`);
@@ -61,7 +63,19 @@ const runStage = (vibecPath, stage, testCmd) => {
 const bootstrap = async () => {
   console.log('Starting bootstrap process');
   let currentVibec = path.join('bin', 'vibec.js');
-  const testCmd = process.env.VIBEC_TEST_CMD || 'npm test'; // Default for now
+
+  // Ensure initial test.sh exists
+  const initialTest = path.join('bin', 'test.sh');
+  const currentTest = path.join('output', 'current', 'test.sh');
+  try {
+    await fs.access(currentTest);
+    console.log('Test script already exists at', currentTest);
+  } catch (err) {
+    await fs.mkdir(path.dirname(currentTest), { recursive: true });
+    await fs.copyFile(initialTest, currentTest);
+    await fs.chmod(currentTest, '755');
+    console.log('Initialized output/current/test.sh from bin/test.sh');
+  }
 
   try {
     await fs.access(currentVibec);
@@ -77,14 +91,21 @@ const bootstrap = async () => {
   }
 
   for (let stage = 1; stage <= highestStage; stage++) {
-    if (!await runStage(currentVibec, stage, testCmd)) {
+    if (!await runStage(currentVibec, stage)) {
       console.log(`Bootstrap failed at stage ${stage}`);
       process.exit(1);
     }
 
-    const newVibec = await checkNewVibec(stage);
+    const newVibec = await checkNewFile(stage, 'vibec.js');
     if (newVibec) {
       currentVibec = newVibec;
+    }
+
+    const newTest = await checkNewFile(stage, 'test.sh');
+    if (newTest) {
+      await fs.copyFile(newTest, currentTest);
+      await fs.chmod(currentTest, '755');
+      console.log('Updated output/current/test.sh');
     }
   }
 

@@ -1,12 +1,9 @@
-# Add Test Running Enhancements
+# Add Initial Test Script
 
-Enhance test running in vibec.js:
-- Add retry logic with --retries flag (default: 0).
-- Improve test output logging (stdout/stderr on failure).
-- Generate initial Jest tests for CLI parsing in tests/cli.test.js.
-- Update package.json with Jest dependency if needed.
+Generate an initial test script for vibec:
+- Create test.sh to check if vibec.js exists and is executable in output/current/.
+- Output to test.sh in the root of the stage/current directory.
+- Ensure it exits with 0 on success, 1 on failure.
 
-## Context: bin/vibec.js
-## Output: bin/vibec.js
-## Output: tests/cli.test.js
-## Output: package.json
+## Context: bin/vibec.js, bin/test.sh
+## Output: test.sh
