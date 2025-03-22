@@ -6,14 +6,14 @@ const { spawnSync } = require('child_process');
 /**
  * Summary of Changes and Reasoning:
  * 
- * - Changed testCmd to use the absolute path to test.sh directly (e.g., "/path/to/test.sh") instead of "bash /path/to/test.sh".
- * - Removed "bash" prefix since test.sh has a shebang (#!/bin/bash) and execSync can run it directly.
- * - Kept initialization and self-improvement logic for vibec.js and test.sh.
+ * - Added initialization of output/current/bin/vibec.js by copying from bin/vibec.js at startup.
+ * - Set permissions to 644 (rw-r--r--) since node doesn’t need +x to run it, unlike test.sh.
+ * - Kept existing test.sh initialization and stage logic intact.
  * 
  * Reasoning:
- * - execSync expects an executable path, not a shell command with arguments.
- * - Simplifies execution, avoiding /bin/sh nesting issues and aligning with execSync's intent.
- * - Ensures compatibility with test.sh's shebang for proper bash execution.
+ * - Ensures output/current/bin/vibec.js exists for tests/001_add_tests.md to test with --dry-run.
+ * - Aligns output/current/ with the initial state, consistent with test.sh’s initialization.
+ * - Simplifies test-first approach without altering prompt order or test.sh’s expectations.
  */
 
 const getHighestStage = async (stacks = ['core', 'tests']) => {
@@ -27,9 +27,7 @@ const getHighestStage = async (stacks = ['core', 'tests']) => {
           highest = Math.max(highest, num);
         }
       }
-    } catch (err) {
-      // Stack may not exist yet
-    }
+    } catch (err) {}
   }
   return highest;
 };
@@ -49,7 +47,7 @@ const runStage = (vibecPath, stage) => {
   const stageStr = String(stage).padStart(3, '0');
   console.log(`Running stage ${stageStr} with ${vibecPath}`);
   const testPath = path.resolve('output/current/test.sh');
-  const testCmd = testPath; // Just the absolute path, no "bash" prefix
+  const testCmd = testPath;
   console.log(`Test command: ${testCmd}`);
   const args = ['--stacks=core,tests', `--test-cmd="${testCmd}"`];
   const result = spawnSync('node', [vibecPath, ...args], { stdio: 'inherit' });
@@ -77,6 +75,20 @@ const bootstrap = async () => {
     console.log('Initialized output/current/test.sh from bin/test.sh');
   }
 
+  // Ensure initial vibec.js exists in output/current/bin/
+  const initialVibec = path.join('bin', 'vibec.js');
+  const currentVibecOutput = path.join('output', 'current', 'bin', 'vibec.js');
+  try {
+    await fs.access(currentVibecOutput);
+    console.log('Vibec script already exists at', currentVibecOutput);
+  } catch (err) {
+    await fs.mkdir(path.dirname(currentVibecOutput), { recursive: true });
+    await fs.copyFile(initialVibec, currentVibecOutput);
+    await fs.chmod(currentVibecOutput, '644'); // Readable/executable by node, no +x needed
+    console.log('Initialized output/current/bin/vibec.js from bin/vibec.js');
+  }
+
+  // Verify bin/vibec.js exists for running stages
   try {
     await fs.access(currentVibec);
   } catch (err) {

@@ -7,13 +7,15 @@ const { execSync } = require('child_process');
 /**
  * Summary of Changes and Reasoning:
  * 
- * - Changed default testCmd to null; only runs tests if provided via CLI (e.g., from bootstrap).
- * - Kept core functionality: CLI parsing, async FS, context parsing, LLM processing, and file writing.
- * - No changes to LLM prompt or test gating logic; relies on bootstrap to supply testCmd.
+ * - Updated parseResponse regex to /File: (.+?)\n```(?:\w+)?\n([\s\S]+?)\n```/g:
+ *   - Changed (?:js)? to (?:\w+)? to match any word (e.g., bash, js) or none after ```.
+ * - Added debug logging in parseResponse to show matched files or warn if none are found.
+ * - No changes to other logic (CLI parsing, LLM processing, file writing, test running).
  * 
  * Reasoning:
- * - Allows bootstrap to control the test command (output/current/test.sh) without hardcoding it here.
- * - Maintains minimalism while supporting test evolution through stacks.
+ * - The old regex rejected ```bash```, causing test.sh to be ignored despite a valid LLM response.
+ * - New regex ensures flexibility for any language specifier, fixing the parsing failure.
+ * - Debug logging helps verify the fix and diagnose future issues.
  */
 
 const parseArgs = () => {
@@ -94,7 +96,7 @@ const processLlm = async (prompt, options) => {
     messages: [
       {
         role: 'system',
-        content: 'Generate code files in this exact format for each file: "File: path/to/file.js\\n```js\\ncontent\\n```". Ensure every response includes at least one file.'
+        content: 'Generate code files in this exact format for each file: "File: path/to/file\n```lang\ncontent\n```". Ensure every response includes ALL files requested in the prompt’s ## Output: sections. Do not skip any requested outputs.'
       },
       { role: 'user', content: prompt }
     ],
@@ -119,7 +121,7 @@ const processLlm = async (prompt, options) => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
             const response = JSON.parse(data);
             const content = response.choices[0].message.content;
-            console.log('LLM response:', content); // Debug output
+            console.log('LLM response:', content);
             resolve(content);
           } else {
             reject(new Error(`API failed: ${res.statusCode} - ${data}`));
@@ -135,10 +137,14 @@ const processLlm = async (prompt, options) => {
 
 const parseResponse = (response) => {
   const files = [];
-  const regex = /File: (.+?)\n```(?:js)?\n([\s\S]+?)\n```/g;
+  const regex = /File: (.+?)\n```(?:\w+)?\n([\s\S]+?)\n```/g;
   let match;
   while ((match = regex.exec(response)) !== null) {
+    console.log(`Parsed file: ${match[1]}`); // Debug: Log each matched file
     files.push({ path: match[1], content: match[2] });
+  }
+  if (files.length === 0) {
+    console.log('Warning: No files matched in response');
   }
   return files;
 };

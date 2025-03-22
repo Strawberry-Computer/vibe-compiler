@@ -5,6 +5,7 @@ Add full CLI parsing to vibec.js:
 - Merge with env vars (e.g., VIBEC_RETRIES) with CLI priority.
 - Implement --help and --version with usage text and exit.
 - Keep existing --stacks, --no-overwrite, --dry-run, --api-url, --api-model, --test-cmd.
+- Ensure all string literals are correctly quoted and JavaScript syntax is complete (e.g., no missing braces or unterminated strings).
 
 ## Context: bin/vibec.js
 ## Output: bin/vibec.js
