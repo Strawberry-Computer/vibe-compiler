@@ -2,28 +2,23 @@
 const fs = require('fs').promises;
 const path = require('path');
 const https = require('https');
+const { execSync } = require('child_process');
 
 /**
  * Summary of Changes and Reasoning:
  * 
- * This is a barebones implementation of vibec.js, stripped to essentials for self-compilation:
- * - Parses basic CLI args (--stacks, --no-overwrite, --dry-run, --api-url, --api-model) with minimal logic.
- * - Uses env vars (VIBEC_API_KEY, etc.) for API config, defaulting to Claude 3.7 via Anthropic API.
- * - Processes .md prompts from specified stacks (default: ['core']), parsing ## Context: for file inclusion.
- * - Sends prompts to LLM (or mocks in dry-run), parsing responses for "File: path\n```js\ncontent```" format.
- * - Writes to output/stages/NNN/ and output/current/ with no-overwrite check.
- * - Uses async FS with await for modern Node.js compatibility.
- * - Removes plugins, hashing, tests, retries, and colored logging (shifted to stacks).
- * - Keeps error handling minimal: logs and exits on failure.
+ * - Added basic test running with --test-cmd flag and gating: runs tests after each stage and exits if they fail.
+ * - Improved LLM system prompt to enforce file output format and added response logging for debugging.
+ * - Kept core functionality: CLI parsing (--stacks, --no-overwrite, --dry-run, --api-url, --api-model, --test-cmd),
+ *   async FS, context parsing, and file writing with no-overwrite check.
+ * - Default API remains Anthropic-compatible with Claude 3.7, but flexible via env vars.
  * 
  * Reasoning:
- * - Simplifies to core self-improving functionality, relying on bootstrap.js and stacks to evolve.
- * - Retains requested features (--no-overwrite, --dry-run) for safety and testing.
- * - Avoids hardcoded API/model values, allowing flexibility with sane defaults.
- * - Parses context but not output, letting LLM dictate file structure for simplicity.
+ * - Early test support ensures each stage is verified, addressing the "No files generated" issue by catching it early.
+ * - Enhanced LLM prompt improves reliability of file generation.
+ * - Minimal changes maintain the barebones approach while adding critical testing.
  */
 
-// Simple CLI parser
 const parseArgs = () => {
   const args = process.argv.slice(2);
   const options = {
@@ -32,7 +27,8 @@ const parseArgs = () => {
     dryRun: false,
     apiUrl: process.env.VIBEC_API_URL || 'https://api.anthropic.com/v1',
     apiModel: process.env.VIBEC_API_MODEL || 'claude-3-7-sonnet',
-    apiKey: process.env.VIBEC_API_KEY || ''
+    apiKey: process.env.VIBEC_API_KEY || '',
+    testCmd: null
   };
 
   for (const arg of args) {
@@ -41,13 +37,14 @@ const parseArgs = () => {
     else if (arg === '--dry-run') options.dryRun = true;
     else if (arg.startsWith('--api-url=')) options.apiUrl = arg.split('=')[1];
     else if (arg.startsWith('--api-model=')) options.apiModel = arg.split('=')[1];
+    else if (arg.startsWith('--test-cmd=')) options.testCmd = arg.split('=')[1];
   }
 
   if (process.env.VIBEC_DRY_RUN === 'true') options.dryRun = true;
+  if (process.env.VIBEC_TEST_CMD) options.testCmd = process.env.VIBEC_TEST_CMD;
   return options;
 };
 
-// Get prompt files sorted by number
 const getPromptFiles = async (stacks) => {
   const prompts = [];
   for (const stack of stacks) {
@@ -66,7 +63,6 @@ const getPromptFiles = async (stacks) => {
   return prompts.sort((a, b) => a.number - b.number);
 };
 
-// Parse ## Context: and load files
 const buildPrompt = async (filePath) => {
   const content = await fs.readFile(filePath, 'utf8');
   const contextMatch = content.match(/## Context: (.+)/);
@@ -86,7 +82,6 @@ const buildPrompt = async (filePath) => {
   return `${content}\n${contextContent.join('')}`;
 };
 
-// Process LLM request
 const processLlm = async (prompt, options) => {
   if (options.dryRun) {
     console.log('Dry run: Skipping LLM, returning prompt as output');
@@ -100,7 +95,10 @@ const processLlm = async (prompt, options) => {
   const requestData = JSON.stringify({
     model: options.apiModel,
     messages: [
-      { role: 'system', content: 'Generate code files in the format: File: path\n```js\ncontent\n```' },
+      {
+        role: 'system',
+        content: 'Generate code files in this exact format for each file: "File: path/to/file.js\\n```js\\ncontent\\n```". Ensure every response includes at least one file.'
+      },
       { role: 'user', content: prompt }
     ],
     max_tokens: 4000
@@ -123,7 +121,9 @@ const processLlm = async (prompt, options) => {
         res.on('end', () => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
             const response = JSON.parse(data);
-            resolve(response.choices[0].message.content);
+            const content = response.choices[0].message.content;
+            console.log('LLM response:', content); // Debug output
+            resolve(content);
           } else {
             reject(new Error(`API failed: ${res.statusCode} - ${data}`));
           }
@@ -136,7 +136,6 @@ const processLlm = async (prompt, options) => {
   });
 };
 
-// Parse LLM response for files
 const parseResponse = (response) => {
   const files = [];
   const regex = /File: (.+?)\n```(?:js)?\n([\s\S]+?)\n```/g;
@@ -147,7 +146,6 @@ const parseResponse = (response) => {
   return files;
 };
 
-// Check for overwrite conflicts
 const checkOverwrite = async (files, noOverwrite) => {
   if (!noOverwrite) return;
   for (const file of files) {
@@ -156,12 +154,11 @@ const checkOverwrite = async (files, noOverwrite) => {
       await fs.access(target);
       throw new Error(`File ${target} exists and --no-overwrite is set`);
     } catch (err) {
-      if (err.code !== 'ENOENT') throw err; // Only ignore "file not found"
+      if (err.code !== 'ENOENT') throw err;
     }
   }
 };
 
-// Write files to stages and current
 const writeFiles = async (stage, files) => {
   const stageDir = path.join('output/stages', String(stage).padStart(3, '0'));
   await fs.mkdir(stageDir, { recursive: true });
@@ -177,7 +174,21 @@ const writeFiles = async (stage, files) => {
   }
 };
 
-// Main function
+const runTests = (testCmd) => {
+  if (!testCmd) return true;
+  console.log(`Running tests: ${testCmd}`);
+  try {
+    const output = execSync(testCmd, { encoding: 'utf8' });
+    console.log('Test output:', output);
+    return true;
+  } catch (err) {
+    console.log('Test failed:', err.message);
+    if (err.stdout) console.log('Stdout:', err.stdout);
+    if (err.stderr) console.log('Stderr:', err.stderr);
+    return false;
+  }
+};
+
 const main = async () => {
   console.log('Starting Vibe Compiler');
   const options = parseArgs();
@@ -212,6 +223,10 @@ const main = async () => {
       await checkOverwrite(files, options.noOverwrite);
       await writeFiles(prompt.number, files);
       console.log(`Generated ${files.length} files for stage ${prompt.number}`);
+      if (!runTests(options.testCmd)) {
+        console.log('Tests failed, aborting');
+        process.exit(1);
+      }
     } catch (err) {
       console.log(`Error: ${err.message}`);
       process.exit(1);
