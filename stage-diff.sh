@@ -1,15 +1,15 @@
 #!/bin/bash
 
-# stage-diff.sh - Compare two stages and generate an HTML report
-# Usage: ./stage-diff.sh <source_stage> <target_stage>
-# Where source_stage and target_stage are stage numbers (like 001, 002) or 'current'
+# stage-diff.sh - Generate an HTML report showing all stages and their changes
+# Usage: ./stage-diff.sh
+# The script automatically detects all stages and creates a comprehensive report
 
 set -e
 
 # Function to display usage
 show_usage() {
-  echo "Usage: $0 <source_stage> <target_stage>"
-  echo "Where source_stage and target_stage are stage numbers (like 001, 002) or 'current'"
+  echo "Usage: $0"
+  echo "The script automatically detects all stages and creates a comprehensive report"
   exit 1
 }
 
@@ -38,17 +38,29 @@ validate_stage() {
   fi
 }
 
-# Check if both arguments are provided
-if [[ $# -ne 2 ]]; then
-  show_usage
+# Function to get all available stages in order
+get_all_stages() {
+  # Find all stage directories and extract stage numbers
+  find output/stages -maxdepth 1 -type d -name "[0-9][0-9][0-9]" | 
+    sed -e 's|output/stages/||' | 
+    sort -n
+}
+
+# Generate a list of all stages
+all_stages=($(get_all_stages))
+
+# Add 'current' at the end if it exists
+if [[ -d "output/current" ]]; then
+  all_stages+=("current")
 fi
 
-source_stage=$1
-target_stage=$2
+# Check if we found any stages
+if [[ ${#all_stages[@]} -eq 0 ]]; then
+  echo "Error: No stages found in output/stages directory"
+  exit 1
+fi
 
-# Validate stages and get their paths
-source_path=$(validate_stage "$source_stage")
-target_path=$(validate_stage "$target_stage")
+echo "Found ${#all_stages[@]} stages to process: ${all_stages[*]}"
 
 # Format stage names for display
 format_stage_name() {
@@ -60,8 +72,45 @@ format_stage_name() {
   fi
 }
 
-source_name=$(format_stage_name "$source_stage")
-target_name=$(format_stage_name "$target_stage")
+# Function to generate an anchor ID from a stage name
+generate_anchor_id() {
+  local stage=$1
+  echo "stage-${stage}"
+}
+
+# Function to generate a table of contents entry
+generate_toc_entry() {
+  local stage=$1
+  local formatted_name=$(format_stage_name "$stage")
+  local anchor_id=$(generate_anchor_id "$stage")
+  echo "<li><a href=\"#${anchor_id}\">${formatted_name}</a></li>"
+}
+
+# Function to find prompt files for a specific stage
+find_prompt_files() {
+  local stage_num=$1
+  
+  # Skip if stage is 'current'
+  if [[ "$stage_num" == "current" ]]; then
+    return
+  fi
+  
+  # Find all prompt files in all stack directories
+  find ./stacks -type f -name "${stage_num}_*.md" | sort
+}
+
+# Function to extract and format prompt content
+format_prompt_content() {
+  local file=$1
+  local content=$(cat "$file" | sed 's/</\&lt;/g; s/>/\&gt;/g')
+  local relative_path=${file#./}
+  
+  echo "<div class=\"prompt-container\">"
+  echo "  <div class=\"prompt-file\">File: $relative_path</div>"
+  echo "  <div class=\"prompt-header\">Prompt:</div>"
+  echo "  <div class=\"prompt-content\">$content</div>"
+  echo "</div>"
+}
 
 # Create output file
 report_file="stage-comparison-report.html"
@@ -73,7 +122,7 @@ report_file="stage-comparison-report.html"
   echo "<head>"
   echo "  <meta charset=\"UTF-8\">"
   echo "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
-  echo "  <title>$source_name vs $target_name Comparison</title>"
+  echo "  <title>Vibe Compiler Stages Report</title>"
   echo "  <style>"
   echo "    body {"
   echo "      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;"
@@ -138,93 +187,364 @@ report_file="stage-comparison-report.html"
   echo "      font-style: italic;"
   echo "      margin-bottom: 20px;"
   echo "    }"
+  echo "    .prompt-container {"
+  echo "      background-color: #f1f8ff;"
+  echo "      border-radius: 5px;"
+  echo "      padding: 15px;"
+  echo "      margin-bottom: 25px;"
+  echo "      border-left: 4px solid #0366d6;"
+  echo "    }"
+  echo "    .toc {"
+  echo "      background-color: #f8f9fa;"
+  echo "      border-radius: 5px;"
+  echo "      padding: 15px 25px;"
+  echo "      margin-bottom: 30px;"
+  echo "      border-left: 4px solid #2c3e50;"
+  echo "    }"
+  echo "    .stage-navigation {"
+  echo "      display: flex;"
+  echo "      justify-content: space-between;"
+  echo "      margin: 20px 0;"
+  echo "      padding: 10px 0;"
+  echo "      border-top: 1px solid #eaecef;"
+  echo "      border-bottom: 1px solid #eaecef;"
+  echo "    }"
+  echo "    .stage-navigation a {"
+  echo "      text-decoration: none;"
+  echo "      color: #0366d6;"
+  echo "      padding: 5px 10px;"
+  echo "      border-radius: 3px;"
+  echo "    }"
+  echo "    .stage-navigation a:hover {"
+  echo "      background-color: #f1f8ff;"
+  echo "    }"
+  echo "    .back-to-top {"
+  echo "      position: fixed;"
+  echo "      bottom: 20px;"
+  echo "      right: 20px;"
+  echo "      background-color: #2c3e50;"
+  echo "      color: white;"
+  echo "      padding: 10px 15px;"
+  echo "      border-radius: 5px;"
+  echo "      text-decoration: none;"
+  echo "      opacity: 0.7;"
+  echo "    }"
+  echo "    .back-to-top:hover {"
+  echo "      opacity: 1;"
+  echo "    }"
+  echo "    .stage-header {"
+  echo "      background-color: #f0f7ff;"
+  echo "      padding: 15px;"
+  echo "      border-radius: 5px;"
+  echo "      margin-bottom: 20px;"
+  echo "      box-shadow: 0 2px 5px rgba(0,0,0,0.1);"
+  echo "    }"
+  echo "    .prompt-header {"
+  echo "      font-weight: bold;"
+  echo "      color: #0366d6;"
+  echo "      margin-bottom: 10px;"
+  echo "    }"
+  echo "    .prompt-content {"
+  echo "      white-space: pre-wrap;"
+  echo "      font-size: 14px;"
+  echo "      line-height: 1.5;"
+  echo "    }"
+  echo "    .prompt-file {"
+  echo "      font-style: italic;"
+  echo "      color: #586069;"
+  echo "      margin-bottom: 5px;"
+  echo "    }"
   echo "  </style>"
   echo "</head>"
   echo "<body>"
-  echo "  <h1>$source_name vs $target_name Comparison</h1>"
+  echo "  <h1>Vibe Compiler Stages Report</h1>"
   echo "  <div class=\"timestamp\">Report generated on: $(date)</div>"
-  echo "  <h2>Changes Summary</h2>"
-  echo "  <div class=\"summary\" id=\"summary-placeholder\"></div>"
+  echo "  <a href=\"#\" class=\"back-to-top\">Back to Top</a>"
+  
+  # Generate table of contents
+  echo "  <h2>Table of Contents</h2>"
+  echo "  <div class=\"toc\">"
+  echo "    <ol>"
+  for stage in "${all_stages[@]}"; do
+    generate_toc_entry "$stage"
+  done
+  echo "    </ol>"
+  echo "  </div>"
 } > "$report_file"
 
-# Get list of all files in both directories
-all_files=$(find "$source_path" "$target_path" -type f | sed -e "s|^$source_path/||" -e "s|^$target_path/||" | sort | uniq)
-
-# Initialize counters
-added_count=0
-removed_count=0
-modified_count=0
-
-# Process each file
-for file in $all_files; do
-  source_file="$source_path/$file"
-  target_file="$target_path/$file"
+# Process each stage
+total_stages=${#all_stages[@]}
+for ((i=0; i<total_stages; i++)); do
+  current_stage="${all_stages[i]}"
+  # For the first stage, we don't have a previous stage to compare with
+  if [[ $i -eq 0 ]]; then
+    # Skip first stage comparison since there's nothing to compare with
+    # But we still want to show the prompt
+    stage_path=$(validate_stage "$current_stage")
+    stage_name=$(format_stage_name "$current_stage")
+    stage_anchor=$(generate_anchor_id "$current_stage")
+    
+    {
+      # Stage header with navigation
+      echo "  <h2 id=\"${stage_anchor}\">${stage_name}</h2>"
+      echo "  <div class=\"stage-header\">"
+      echo "    <p>This is the first stage in the sequence.</p>"
+      echo "  </div>"
+      
+      # Navigation
+      echo "  <div class=\"stage-navigation\">"
+      echo "    <span></span>" # Empty span for alignment
+      if [[ $i -lt $((total_stages-1)) ]]; then
+        next_stage="${all_stages[$((i+1))]}"
+        next_anchor=$(generate_anchor_id "$next_stage")
+        next_name=$(format_stage_name "$next_stage")
+        echo "    <a href=\"#${next_anchor}\">Next: ${next_name} &rarr;</a>"
+      else
+        echo "    <span></span>"
+      fi
+      echo "  </div>"
+      
+      # Show prompt content for
+      # Show prompt content for the current stage
+      prompt_files=($(find_prompt_files "$current_stage"))
+      if [[ ${#prompt_files[@]} -gt 0 ]]; then
+        echo "    <h3>Prompts</h3>"
+        for prompt_file in "${prompt_files[@]}"; do
+          format_prompt_content "$prompt_file"
+        done
+      fi
+      
+      # For the first stage, list all initial files
+      echo "    <h3>Initial Files</h3>"
+      file_count=$(find "$stage_path" -type f | wc -l | tr -d ' ')
+      echo "    <p>This stage contains $file_count files.</p>"
+      echo "    <details>"
+      echo "      <summary>View file list</summary>"
+      echo "      <ul>"
+      find "$stage_path" -type f | sort | while read -r file; do
+        rel_path="${file#$stage_path/}"
+        echo "        <li>$rel_path</li>"
+      done
+      echo "      </ul>"
+      echo "    </details>"
+    } >> "$report_file"
+    
+    continue
+  fi
   
-  # Determine file status
-  if [[ -f "$source_file" && -f "$target_file" ]]; then
-    # File exists in both directories, check if modified
-    if ! diff -q "$source_file" "$target_file" > /dev/null 2>&1; then
-      {
-        echo "  <h3>Modified: $file</h3>"
-        echo "  <pre><code>"
-        diff -u "$source_file" "$target_file" | tail -n +3 | while IFS= read -r line; do
-          if [[ $line == +* ]]; then
-            echo "    <span class=\"diff-added\">$line</span>"
-          elif [[ $line == -* ]]; then
-            echo "    <span class=\"diff-removed\">$line</span>"
+  # For subsequent stages, compare with previous stage
+  previous_stage="${all_stages[$((i-1))]}"
+  previous_path=$(validate_stage "$previous_stage")
+  current_path=$(validate_stage "$current_stage")
+  
+  stage_name=$(format_stage_name "$current_stage")
+  stage_anchor=$(generate_anchor_id "$current_stage")
+  previous_anchor=$(generate_anchor_id "$previous_stage")
+  previous_name=$(format_stage_name "$previous_stage")
+  
+  # Initialize counters for this stage
+  added_files=0
+  removed_files=0
+  modified_files=0
+  
+  # Create arrays for tracking changes
+  added_file_list=()
+  removed_file_list=()
+  modified_file_list=()
+  
+  # Start stage section
+  {
+    # Stage header with navigation
+    echo "  <h2 id=\"${stage_anchor}\">${stage_name}</h2>"
+    echo "  <div class=\"stage-header\">"
+    echo "    <p>Changes from ${previous_name} to ${stage_name}</p>"
+    echo "  </div>"
+    
+    # Navigation
+    echo "  <div class=\"stage-navigation\">"
+    if [[ $i -gt 0 ]]; then
+      echo "    <a href=\"#${previous_anchor}\">&larr; Previous: ${previous_name}</a>"
+    else
+      echo "    <span></span>"
+    fi
+    if [[ $i -lt $((total_stages-1)) ]]; then
+      next_stage="${all_stages[$((i+1))]}"
+      next_anchor=$(generate_anchor_id "$next_stage")
+      next_name=$(format_stage_name "$next_stage")
+      echo "    <a href=\"#${next_anchor}\">Next: ${next_name} &rarr;</a>"
+    else
+      echo "    <span></span>"
+    fi
+    echo "  </div>"
+    
+    # Show prompt content for the current stage
+    prompt_files=($(find_prompt_files "$current_stage"))
+    if [[ ${#prompt_files[@]} -gt 0 ]]; then
+      echo "  <h3>Prompts</h3>"
+      for prompt_file in "${prompt_files[@]}"; do
+        format_prompt_content "$prompt_file"
+      done
+    fi
+    
+    # Find all files in both directories
+    current_files=$(find "$current_path" -type f | sort)
+    previous_files=$(find "$previous_path" -type f | sort)
+    
+    # Find added files (in current but not in previous)
+    echo "  <h3>Added Files</h3>"
+    for file in $current_files; do
+      rel_path="${file#$current_path/}"
+      previous_file="$previous_path/$rel_path"
+      
+      if [[ ! -f "$previous_file" ]]; then
+        added_files=$((added_files + 1))
+        added_file_list+=("$rel_path")
+      fi
+    done
+    
+    if [[ $added_files -gt 0 ]]; then
+      echo "  <p>$added_files new files were added in this stage.</p>"
+      echo "  <details>"
+      echo "    <summary>View added files</summary>"
+      echo "    <ul>"
+      for file in "${added_file_list[@]}"; do
+        echo "      <li>$file</li>"
+      done
+      echo "    </ul>"
+      echo "    <details>"
+      echo "      <summary>View file contents</summary>"
+      for file in "${added_file_list[@]}"; do
+        current_file="$current_path/$file"
+        echo "      <h4>$file</h4>"
+        echo "      <pre class=\"diff-added\">"
+        cat "$current_file" | sed 's/</\&lt;/g; s/>/\&gt;/g' | while read -r line; do
+          echo "+ $line"
+        done
+        echo "      </pre>"
+      done
+      echo "    </details>"
+      echo "  </details>"
+    else
+      echo "  <p>No files were added in this stage.</p>"
+    fi
+    
+    # Find removed files (in previous but not in current)
+    echo "  <h3>Removed Files</h3>"
+    for file in $previous_files; do
+      rel_path="${file#$previous_path/}"
+      current_file="$current_path/$rel_path"
+      
+      if [[ ! -f "$current_file" ]]; then
+        removed_files=$((removed_files + 1))
+        removed_file_list+=("$rel_path")
+      fi
+    done
+    
+    if [[ $removed_files -gt 0 ]]; then
+      echo "  <p>$removed_files files were removed in this stage.</p>"
+      echo "  <details>"
+      echo "    <summary>View removed files</summary>"
+      echo "    <ul>"
+      for file in "${removed_file_list[@]}"; do
+        echo "      <li>$file</li>"
+      done
+      echo "    </ul>"
+      echo "    <details>"
+      echo "      <summary>View removed content</summary>"
+      for file in "${removed_file_list[@]}"; do
+        previous_file="$previous_path/$file"
+        echo "      <h4>$file</h4>"
+        echo "      <pre class=\"diff-removed\">"
+        cat "$previous_file" | sed 's/</\&lt;/g; s/>/\&gt;/g' | while read -r line; do
+          echo "- $line"
+        done
+        echo "      </pre>"
+      done
+      echo "    </details>"
+      echo "  </details>"
+    else
+      echo "  <p>No files were removed in this stage.</p>"
+    fi
+    
+    # Find modified files (in both but different)
+    echo "  <h3>Modified Files</h3>"
+    for file in $current_files; do
+      rel_path="${file#$current_path/}"
+      previous_file="$previous_path/$rel_path"
+      
+      if [[ -f "$previous_file" ]]; then
+        # Compare files
+        if ! cmp -s "$file" "$previous_file"; then
+          modified_files=$((modified_files + 1))
+          modified_file_list+=("$rel_path")
+        fi
+      fi
+    done
+    
+    if [[ $modified_files -gt 0 ]]; then
+      echo "  <p>$modified_files files were modified in this stage.</p>"
+      echo "  <details>"
+      echo "    <summary>View modified files</summary>"
+      echo "    <ul>"
+      for file in "${modified_file_list[@]}"; do
+        echo "      <li>$file</li>"
+      done
+      echo "    </ul>"
+      echo "    <details>"
+      echo "      <summary>View changes</summary>"
+      for file in "${modified_file_list[@]}"; do
+        current_file="$current_path/$file"
+        previous_file="$previous_path/$file"
+        echo "      <h4>$file</h4>"
+        echo "      <pre>"
+        # Generate diff and colorize output
+        diff -u "$previous_file" "$current_file" | tail -n +3 | sed 's/</\&lt;/g; s/>/\&gt;/g' | while read -r line; do
+          if [[ $line == -* ]]; then
+            echo "<span class=\"diff-removed\">$line</span>"
+          elif [[ $line == +* ]]; then
+            echo "<span class=\"diff-added\">$line</span>"
           else
-            echo "    $line"
+            echo "$line"
           fi
         done
-        echo "  </code></pre>"
-      } >> "$report_file"
-      ((modified_count++))
+        echo "      </pre>"
+      done
+      echo "    </details>"
+      echo "  </details>"
+    else
+      echo "  <p>No files were modified in this stage.</p>"
     fi
-  elif [[ -f "$source_file" && ! -f "$target_file" ]]; then
-    # File exists in source but not in target (removed)
-    {
-      echo "  <h3>Removed: $file</h3>"
-      echo "  <p>File exists in $source_name but was removed in $target_name</p>"
-    } >> "$report_file"
-    ((removed_count++))
-  elif [[ ! -f "$source_file" && -f "$target_file" ]]; then
-    # File exists in target but not in source (added)
-    {
-      echo "  <h3>Added: $file</h3>"
-      echo "  <p>File was added in $target_name</p>"
-      echo "  <pre><code>"
-      cat "$target_file" | sed 's/</\&lt;/g; s/>/\&gt;/g'
-      echo "  </code></pre>"
-    } >> "$report_file"
-    ((added_count++))
-  fi
+    
+    # Add stage summary
+    echo "  <div class=\"summary\">"
+    echo "    <h3>Stage Summary</h3>"
+    echo "    <ul>"
+    echo "      <li>Added files: $added_files</li>"
+    echo "      <li>Removed files: $removed_files</li>"
+    echo "      <li>Modified files: $modified_files</li>"
+    echo "      <li>Total changes: $((added_files + removed_files + modified_files))</li>"
+    echo "    </ul>"
+    echo "  </div>"
+    
+    echo "  <hr class=\"hr\">"
+  } >> "$report_file"
 done
 
-# Update summary
+# Complete the HTML document
 {
-  # Create the summary HTML content
-  echo "  <ul>"
-  echo "    <li>Added files: $added_count</li>"
-  echo "    <li>Removed files: $removed_count</li>"
-  echo "    <li>Modified files: $modified_count</li>"
-  echo "    <li>Total files affected: $((added_count + removed_count + modified_count))</li>"
-  echo "  </ul>"
-  echo "  <div class=\"hr\"></div>"
-} >> "$report_file.tmp"
-
-# Combine the temporary summary with the rest of the report
-cat "$report_file" >> "$report_file.tmp"
-echo "</body>" >> "$report_file.tmp"
-echo "</html>" >> "$report_file.tmp"
-mv "$report_file.tmp" "$report_file"
-
-# Replace the summary placeholder with the actual summary
-# This is done separately since we need to generate the whole report first to count the files
-sed -i.bak "s|<div class=\"summary\" id=\"summary-placeholder\"></div>|<div class=\"summary\">\n  <ul>\n    <li>Added files: $added_count</li>\n    <li>Removed files: $removed_count</li>\n    <li>Modified files: $modified_count</li>\n    <li>Total files affected: $((added_count + removed_count + modified_count))</li>\n  </ul>\n  </div>|g" "$report_file"
-rm -f "$report_file.bak"
+  echo "</body>"
+  echo "</html>"
+} >> "$report_file"
 
 echo "Report generated: $report_file"
-echo "Summary: $added_count added, $removed_count removed, $modified_count modified"
+echo "All stages processed successfully"
+
+# Open the report in the default browser (uncomment if desired)
+# if command -v open > /dev/null; then
+#   open "$report_file"
+# elif command -v xdg-open > /dev/null; then
+#   xdg-open "$report_file"
+# fi
 
 exit 0
-
+exit 0
