@@ -7,15 +7,13 @@ const { execSync } = require('child_process');
 /**
  * Summary of Changes and Reasoning:
  * 
- * - Updated parseResponse regex to /File: (.+?)\n```(?:\w+)?\n([\s\S]+?)\n```/g:
- *   - Changed (?:js)? to (?:\w+)? to match any word (e.g., bash, js) or none after ```.
- * - Added debug logging in parseResponse to show matched files or warn if none are found.
- * - No changes to other logic (CLI parsing, LLM processing, file writing, test running).
+ * - Updated parseResponse regex to /File: (.+?)\n```(?:\w+)?\n([\s\S]+?)\n```/g (prior change kept).
+ * - Updated buildPrompt to resolve context files relative to output/current/ instead of project root.
+ * - No changes to CLI parsing, LLM processing, file writing, or test running.
  * 
  * Reasoning:
- * - The old regex rejected ```bash```, causing test.sh to be ignored despite a valid LLM response.
- * - New regex ensures flexibility for any language specifier, fixing the parsing failure.
- * - Debug logging helps verify the fix and diagnose future issues.
+ * - Context now uses generated files (e.g., output/current/bin/vibec.js), enabling self-referential evolution.
+ * - Maintains existing functionality while shifting context base as requested.
  */
 
 const parseArgs = () => {
@@ -71,7 +69,8 @@ const buildPrompt = async (filePath) => {
   const contextContent = await Promise.all(
     files.map(async (file) => {
       try {
-        const data = await fs.readFile(file, 'utf8');
+        const fullPath = path.join('output/current', file);
+        const data = await fs.readFile(fullPath, 'utf8');
         return `\n---\nFile: ${file}\n${data}`;
       } catch (err) {
         return `\n---\nFile: ${file}\n// Not found: ${err.message}`;

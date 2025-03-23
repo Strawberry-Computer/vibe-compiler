@@ -6,14 +6,14 @@ const { spawnSync } = require('child_process');
 /**
  * Summary of Changes and Reasoning:
  * 
- * - Added initialization of output/current/bin/vibec.js by copying from bin/vibec.js at startup.
- * - Set permissions to 644 (rw-r--r--) since node doesn’t need +x to run it, unlike test.sh.
- * - Kept existing test.sh initialization and stage logic intact.
+ * - Changed initial currentVibec to output/current/bin/vibec.js instead of bin/vibec.js.
+ * - Kept existing initialization of output/current/bin/vibec.js and test.sh.
+ * - No changes to stage logic or test.sh updates.
  * 
  * Reasoning:
- * - Ensures output/current/bin/vibec.js exists for tests/001_add_tests.md to test with --dry-run.
- * - Aligns output/current/ with the initial state, consistent with test.sh’s initialization.
- * - Simplifies test-first approach without altering prompt order or test.sh’s expectations.
+ * - Aligns with new Context: resolution relative to output/current/.
+ * - Pre-copy ensures early stages have a starting vibec.js in output/current/.
+ * - Maintains existing bootstrap flow with minimal disruption.
  */
 
 const getHighestStage = async (stacks = ['core', 'tests']) => {
@@ -60,7 +60,7 @@ const runStage = (vibecPath, stage) => {
 
 const bootstrap = async () => {
   console.log('Starting bootstrap process');
-  let currentVibec = path.join('bin', 'vibec.js');
+  let currentVibec = path.join('output', 'current', 'bin', 'vibec.js');
 
   // Ensure initial test.sh exists
   const initialTest = path.join('bin', 'test.sh');
@@ -88,11 +88,11 @@ const bootstrap = async () => {
     console.log('Initialized output/current/bin/vibec.js from bin/vibec.js');
   }
 
-  // Verify bin/vibec.js exists for running stages
+  // Verify currentVibec exists for running stages
   try {
     await fs.access(currentVibec);
   } catch (err) {
-    console.log('Error: bin/vibec.js not found');
+    console.log('Error: output/current/bin/vibec.js not found after initialization');
     process.exit(1);
   }
 
