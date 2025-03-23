@@ -6,14 +6,14 @@ const { spawnSync } = require('child_process');
 /**
  * Summary of Changes and Reasoning:
  * 
- * - Changed initial currentVibec to output/current/bin/vibec.js instead of bin/vibec.js.
+ * - Changed initial currentVibec to output/current/bin/vibec.js instead of bin/vibec.js (prior change kept).
+ * - Fixed failure log in runStage to use stageStr instead of stage number directly.
  * - Kept existing initialization of output/current/bin/vibec.js and test.sh.
- * - No changes to stage logic or test.sh updates.
  * 
  * Reasoning:
- * - Aligns with new Context: resolution relative to output/current/.
+ * - Aligns with Context: resolution relative to output/current/.
  * - Pre-copy ensures early stages have a starting vibec.js in output/current/.
- * - Maintains existing bootstrap flow with minimal disruption.
+ * - Correct stage logging improves error reporting when tests fail.
  */
 
 const getHighestStage = async (stacks = ['core', 'tests']) => {
@@ -104,7 +104,7 @@ const bootstrap = async () => {
 
   for (let stage = 1; stage <= highestStage; stage++) {
     if (!await runStage(currentVibec, stage)) {
-      console.log(`Bootstrap failed at stage ${stage}`);
+      console.log(`Bootstrap failed at stage ${String(stage).padStart(3, '0')}`);
       process.exit(1);
     }
 
