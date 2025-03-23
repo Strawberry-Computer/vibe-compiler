@@ -7,5 +7,5 @@ Generate an initial test script for vibec:
 - Exit with 0 on success, 1 on failure.
 - Keep it simple: no additional feature checks beyond existence and dry-run execution.
 
-## Context: bin/vibec.js, bin/test.sh
+## Context: bin/vibec.js, test.sh
 ## Output: test.sh
