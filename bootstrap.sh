@@ -4,14 +4,14 @@
 set -ex
 
 # Stage 0: Generate initial files using llm
-cat bootstrap/test.md | llm > bin/test.sh
+cat bootstrap/test.md | llm | tee bin/test.sh
 chmod +x bin/test.sh
 echo -e "Generated bin/test.sh\n"
 
-cat bootstrap/vibec.md | llm > bin/vibec.js
+cat bootstrap/vibec.md | llm | tee bin/vibec.js
 echo -e "Generated bin/vibec.js\n"
 
-cat bootstrap/bootstrap.md | llm > bootstrap.js
+cat bootstrap/bootstrap.md | llm | tee bootstrap.js
 echo -e "Generated bootstrap.js\n"
 
 # Run the generated bootstrap.js to continue the process
