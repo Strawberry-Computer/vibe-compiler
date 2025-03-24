@@ -1,10 +1,6 @@
 Generate a Node.js script with the following exact content:
 - Start with shebang: #!/usr/bin/env node
 - Import fs.promises, path, https, and child_process.execSync
-- Include a comment block starting with /** and ending with */, summarizing:
-  - Updated parseResponse regex to /File: (.+?)\n```(?:\w+)?\n([\s\S]+?)\n```/g
-  - Updated buildPrompt to resolve context files relative to output/current/
-  - Reasoning: Enables self-referential evolution by using generated files as context for processing stacked prompts
 - Define parseArgs to parse CLI args (e.g., --stacks=core, --dry-run) and env vars (e.g., VIBEC_API_KEY), with defaults like stacks: ['core'], apiUrl 'https://openrouter.ai/api/v1', apiModel 'anthropic/claude-3.7-sonnet', testCmd null
 - Define getPromptFiles to scan stacks/<stack> for ###_*.md files from an array of stacks, return objects with stack, file, and number sorted by number
 - Define buildPrompt to read a file and append context from output/current/ using ## Context: file1, file2 syntax
