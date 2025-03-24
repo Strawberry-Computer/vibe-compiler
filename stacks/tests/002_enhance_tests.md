@@ -1,12 +1,11 @@
 # Enhance Test Script
 
-Enhance test.sh with more robust tests:
-- Add checks for basic execution (e.g., `node output/current/bin/vibec.js` runs without crashing).
-- Test dry-run mode explicitly (e.g., `node output/current/bin/vibec.js --dry-run`).
-- Use `tape` for simple TAP-compliant tests in JS, outputting to `test.js` (relative to `output/current/`).
-- Use async functions with `tape`. No need for t.end()
-- Ensure `test.sh` runs the JS tests by executing `node output/current/test.js`.
-- Avoid running real LLM inference in tests; use `--dry-run` to simulate behavior.
+Enhance `test.sh` and add `test.js` to validate logging from `bin/vibec.js`:
+- Update `test.sh` to run `node output/current/bin/vibec.js --dry-run` and `node output/current/test.js`.
+- Use `tape` in `test.js` for TAP-compliant tests, no `t.end()` needed with async.
+- Test: `log.info`, `log.warn`, `log.error`, `log.success` output ANSI colors; `log.debug` outputs only if `VIBEC_DEBUG=1`.
+- Output to `test.sh` and `test.js` in `output/current/`.
+- Use `node` explicitly, no LLM inference.
 
 ## Context: bin/vibec.js, test.sh
 ## Output: test.sh
