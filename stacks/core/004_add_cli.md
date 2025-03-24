@@ -1,6 +1,6 @@
 # Expand CLI Support
 
-Add complete CLI parsing to vibec.js. Support all listed flags, merge with environment variables (CLI overrides env vars), and implement `--help` and `--version` with usage text. Ensure proper JavaScript syntax: quoted strings, closed objects.
+Add complete CLI parsing and module exports to vibec.js. Support all listed flags, merge with environment variables (CLI overrides env vars), and implement `--help` and `--version` with usage text. Ensure proper JavaScript syntax: quoted strings, closed objects.
 
 ## CLI Options
 - **`--stacks=<stack1,stack2,...>`**: Stacks to process (e.g., `core,tests`). Default: `core`.
@@ -11,4 +11,5 @@ Add complete CLI parsing to vibec.js. Support all listed flags, merge with envir
 - **`--test-cmd=<command>`**: Test command (e.g., `npm test`). Default: none.
 - **`--retries=<number>`**: Retry count, non-negative integer. Default: 0.
 - **`--plugin-timeout=<ms>`**: JS plugin timeout in ms, positive integer. Default: 5000.
+- **`--output=<dir>`**: Output directory (e.g., `custom_output`). Default: `output`.
 - **`--help`**: Show usage and exit. Flag. Output:
