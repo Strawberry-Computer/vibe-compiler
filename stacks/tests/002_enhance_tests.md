@@ -9,6 +9,8 @@ Enhance `test.sh` and add `test.js` to validate logging and real mode in `bin/vi
     - mock POST `/chat/completions` to return 'File: test.js\n```js\nconsole.log("mock")\n```'
     - run `main()` with `--output=test_output` and `--api-url=http://localhost:3000`
     - check `test_output/current/test.js` exists.
+    - don't catch errors unless expected, let `tape` handle it. 
+    - cleanup in `finally` block to close server and remove `test_output` directory.
 
 - Output to `test.sh` and `test.js` in `output/current/`.
 - Use only Node built-in modules (`http`, `tape`).

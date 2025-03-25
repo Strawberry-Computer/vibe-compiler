@@ -2,6 +2,7 @@
 
 echo "Tests passed"
 
-node output/current/bin/vibec.js --dry-run >/dev/null 2>&1
+# Verify the Vibe Compiler's dry-run mode
+node output/current/bin/vibec.js --dry-run
 
 exit 0
