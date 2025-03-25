@@ -9,105 +9,102 @@ async function parseArgs() {
   const args = process.argv.slice(2);
   const options = {
     stacks: ['core'],
-    apiKey: process.env.VIBEC_API_KEY,
     apiUrl: 'https://openrouter.ai/api/v1',
     apiModel: 'anthropic/claude-3.7-sonnet',
+    testCmd: null,
     dryRun: false,
     noOverwrite: false,
-    testCmd: null,
-    start: null,
-    end: null
+    start: 0,
+    end: Infinity
   };
 
   for (const arg of args) {
     if (arg.startsWith('--stacks=')) {
-      options.stacks = arg.substring('--stacks='.length).split(',');
+      options.stacks = arg.substring(9).split(',');
     } else if (arg === '--dry-run') {
       options.dryRun = true;
     } else if (arg === '--no-overwrite') {
       options.noOverwrite = true;
-    } else if (arg.startsWith('--test-cmd=')) {
-      options.testCmd = arg.substring('--test-cmd='.length);
-    } else if (arg.startsWith('--api-key=')) {
-      options.apiKey = arg.substring('--api-key='.length);
     } else if (arg.startsWith('--api-url=')) {
-      options.apiUrl = arg.substring('--api-url='.length);
+      options.apiUrl = arg.substring(10);
     } else if (arg.startsWith('--api-model=')) {
-      options.apiModel = arg.substring('--api-model='.length);
+      options.apiModel = arg.substring(12);
+    } else if (arg.startsWith('--test-cmd=')) {
+      options.testCmd = arg.substring(11);
     } else if (arg.startsWith('--start=')) {
-      options.start = Number(arg.substring('--start='.length));
+      options.start = Number(arg.substring(8));
     } else if (arg.startsWith('--end=')) {
-      options.end = Number(arg.substring('--end='.length));
+      options.end = Number(arg.substring(6));
     }
   }
+
+  options.apiKey = process.env.VIBEC_API_KEY || '';
 
   return options;
 }
 
 async function getPromptFiles(stacks) {
   const promptFiles = [];
+
   for (const stack of stacks) {
-    const stackDir = path.join('stacks', stack);
     try {
-      const files = await fs.readdir(stackDir);
+      const files = await fs.readdir(path.join('stacks', stack));
       for (const file of files) {
-        if (file.match(/^\d+_.*\.md$/)) {
-          const number = parseInt(file.split('_')[0], 10);
+        const match = file.match(/^(\d+)_(.*)\.md$/);
+        if (match) {
           promptFiles.push({
             stack,
             file,
-            number,
-            path: path.join(stackDir, file)
+            number: parseInt(match[1], 10)
           });
         }
       }
-    } catch (err) {
-      console.error(`Error reading stack directory ${stackDir}:`, err);
+    } catch (error) {
+      console.error(`Error reading stack directory: ${stack}`, error.message);
     }
   }
+
   return promptFiles.sort((a, b) => a.number - b.number);
 }
 
-async function buildPrompt(promptPath) {
-  let content = await fs.readFile(promptPath, 'utf-8');
-  
+async function buildPrompt(promptFile) {
+  const filePath = path.join('stacks', promptFile.stack, promptFile.file);
+  let content = await fs.readFile(filePath, 'utf8');
+
   // Extract context files
   const contextMatch = content.match(/## Context: (.+)/);
   if (contextMatch) {
     const contextFiles = contextMatch[1].split(',').map(f => f.trim());
     let contextContent = '';
-    
-    for (const contextFile of contextFiles) {
+
+    for (const file of contextFiles) {
       try {
-        const filePath = path.join('output', 'current', contextFile);
-        const fileContent = await fs.readFile(filePath, 'utf-8');
-        contextContent += `\n\n### ${contextFile}\n\`\`\`\n${fileContent}\n\`\`\``;
-      } catch (err) {
-        console.warn(`Warning: Could not read context file ${contextFile}:`, err.message);
+        const filePath = path.join('output', 'current', file);
+        const fileContent = await fs.readFile(filePath, 'utf8');
+        contextContent += `\n\n### ${file}\n\`\`\`\n${fileContent}\n\`\`\``;
+      } catch (error) {
+        console.warn(`Warning: Could not read context file ${file}: ${error.message}`);
       }
     }
-    
-    // Replace the Context line with the actual content
-    content = content.replace(/## Context: .+/, `## Context:${contextContent}`);
+
+    content += contextContent;
   }
-  
+
   return content;
 }
 
 async function processLlm(prompt, options) {
-  if (!options.apiKey && !options.dryRun) {
-    throw new Error('API key is required. Set VIBEC_API_KEY environment variable or use --api-key=');
-  }
-  
   if (options.dryRun) {
-    console.log('DRY RUN - Would send prompt:');
+    console.log('DRY RUN - LLM prompt:');
     console.log(prompt);
     return 'File: example/file\n```lang\ncontent\n```';
   }
-  
-  const llmUrl = `${options.apiUrl}/chat/completions`;
-  
-  const requestData = {
+
+  if (!options.apiKey) {
+    throw new Error('API key is required. Set VIBEC_API_KEY environment variable.');
+  }
+
+  const payload = {
     model: options.apiModel,
     messages: [
       {
@@ -120,17 +117,19 @@ async function processLlm(prompt, options) {
       }
     ]
   };
+
+  const apiUrl = `${options.apiUrl}/chat/completions`;
   
-  console.log(`Sending prompt to ${options.apiModel}...`);
+  console.log(`Sending request to LLM API: ${apiUrl}`);
   
   try {
-    const response = await fetch(llmUrl, {
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${options.apiKey}`,
+        'Authorization': `Bearer ${options.apiKey}`
       },
-      body: JSON.stringify(requestData)
+      body: JSON.stringify(payload)
     });
     
     if (!response.ok) {
@@ -146,113 +145,139 @@ async function processLlm(prompt, options) {
   }
 }
 
-function parseResponse(response) {
+function parseResponse(text) {
   const files = [];
   const regex = /File: (.+?)\n```(?:\w+)?\n([\s\S]+?)\n```/g;
   let match;
-  
-  while ((match = regex.exec(response)) !== null) {
-    const filePath = match[1];
-    const content = match[2];
-    files.push({ path: filePath, content });
+
+  while ((match = regex.exec(text)) !== null) {
+    files.push({
+      path: match[1].trim(),
+      content: match[2]
+    });
   }
-  
+
   return files;
 }
 
 async function checkOverwrite(files, noOverwrite) {
   if (!noOverwrite) return true;
-  
+
   for (const file of files) {
-    const fullPath = path.join('output', 'current', file.path);
     try {
-      await fs.access(fullPath);
-      throw new Error(`File ${fullPath} already exists and --no-overwrite is set`);
-    } catch (err) {
-      if (err.code !== 'ENOENT') throw err;
+      const filePath = path.join('output', 'current', file.path);
+      await fs.access(filePath);
+      console.error(`Error: File ${file.path} already exists and --no-overwrite is set`);
+      return false;
+    } catch (error) {
+      // File doesn't exist, we can continue
     }
   }
-  
+
   return true;
 }
 
 async function writeFiles(files, stage) {
-  const stageDir = path.join('output', 'stages', String(stage));
+  const stageDir = path.join('output', 'stages', stage.toString());
   
-  // Create directories if they don't exist
-  await fs.mkdir(stageDir, { recursive: true });
-  await fs.mkdir(path.join('output', 'current'), { recursive: true });
-  
+  try {
+    await fs.mkdir(stageDir, { recursive: true });
+  } catch (error) {
+    console.error(`Error creating stage directory: ${error.message}`);
+  }
+
   for (const file of files) {
-    const stagePath = path.join(stageDir, file.path);
-    const currentPath = path.join('output', 'current', file.path);
-    
-    // Create parent directories
-    await fs.mkdir(path.dirname(stagePath), { recursive: true });
-    await fs.mkdir(path.dirname(currentPath), { recursive: true });
-    
-    // Write files
-    await fs.writeFile(stagePath, file.content);
-    await fs.writeFile(currentPath, file.content);
-    
-    console.log(`Wrote ${file.path}`);
+    try {
+      const currentPath = path.join('output', 'current', file.path);
+      const stagePath = path.join(stageDir, file.path);
+
+      // Create directories if they don't exist
+      await fs.mkdir(path.dirname(currentPath), { recursive: true });
+      await fs.mkdir(path.dirname(stagePath), { recursive: true });
+
+      // Write files
+      await fs.writeFile(currentPath, file.content);
+      await fs.writeFile(stagePath, file.content);
+      
+      console.log(`Wrote file: ${file.path}`);
+    } catch (error) {
+      console.error(`Error writing file ${file.path}: ${error.message}`);
+    }
   }
 }
 
 function runTests(testCmd) {
   if (!testCmd) return true;
-  
+
   try {
     console.log(`Running tests: ${testCmd}`);
     execSync(testCmd, { stdio: 'inherit' });
     return true;
-  } catch (err) {
-    console.error('Tests failed');
+  } catch (error) {
+    console.error('Tests failed:', error.message);
     return false;
   }
 }
 
 async function main() {
   const options = await parseArgs();
+  console.log(`Running with options:`, options);
+
   const promptFiles = await getPromptFiles(options.stacks);
-  
+  console.log(`Found ${promptFiles.length} prompt files`);
+
   for (const promptFile of promptFiles) {
-    // Skip if outside specified range
-    if (
-      (options.start !== null && promptFile.number < options.start) ||
-      (options.end !== null && promptFile.number > options.end)
-    ) {
-      console.log(`Skipping ${promptFile.path} (outside requested range)`);
+    // Skip stages outside the specified range
+    if (promptFile.number < options.start || promptFile.number > options.end) {
+      console.log(`Skipping stage ${promptFile.number}: ${promptFile.file} (outside range ${options.start}-${options.end})`);
       continue;
     }
+
+    console.log(`Processing ${promptFile.stack}/${promptFile.file} (stage ${promptFile.number})`);
+    const prompt = await buildPrompt(promptFile);
+    const llmResponse = await processLlm(prompt, options);
+    const files = parseResponse(llmResponse);
     
-    console.log(`Processing ${promptFile.path}`);
-    
-    const prompt = await buildPrompt(promptFile.path);
-    const response = await processLlm(prompt, options);
-    const files = parseResponse(response);
+    console.log(`Extracted ${files.length} files from LLM response`);
     
     if (files.length === 0) {
-      console.warn('Warning: No files extracted from LLM response');
-      continue;
-    }
-    
-    try {
-      await checkOverwrite(files, options.noOverwrite);
-      await writeFiles(files, promptFile.number);
-      
-      if (options.testCmd) {
-        const testsPass = runTests(options.testCmd);
-        if (!testsPass) process.exit(1);
-      }
-    } catch (err) {
-      console.error(`Error processing ${promptFile.path}:`, err);
+      console.error('Error: No files found in LLM response');
       process.exit(1);
     }
+    
+    const canWrite = await checkOverwrite(files, options.noOverwrite);
+    if (!canWrite) {
+      console.error('Aborting due to --no-overwrite constraint');
+      process.exit(1);
+    }
+    
+    await writeFiles(files, promptFile.number);
+    
+    if (options.testCmd) {
+      const testsPass = runTests(options.testCmd);
+      if (!testsPass) {
+        console.error('Aborting due to test failure');
+        process.exit(1);
+      }
+    }
   }
+
+  console.log('All prompts processed successfully');
 }
 
-main().catch(err => {
-  console.error('Error:', err);
+main().catch(error => {
+  console.error('Error:', error);
   process.exit(1);
 });
+
+module.exports = {
+  parseArgs,
+  getPromptFiles,
+  buildPrompt,
+  processLlm,
+  parseResponse,
+  checkOverwrite,
+  writeFiles,
+  runTests,
+  main
+};
