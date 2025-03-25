@@ -16,14 +16,18 @@ vibec/
 ├── bootstrap.js            # Progressive bootstrapping script
 ├── stacks/
 │   ├── core/               # Core functionality prompts
-│   │   ├── 001_initial_implementation.md  # Placeholder for base vibec.js
-│   │   ├── 002_add_logging.md
-│   │   ├── 003_add_plugins.md
-│   │   └── ...
+│   │   ├── 001_add_exports.md  # Exports for testing
+│   │   ├── 002_add_logging.md  # Colored logging
+│   │   ├── 003_add_plugins.md  # Plugin support
+│   │   ├── 004_add_cli.md      # CLI enhancements
+│   │   └── 005_add_config.md   # Config loading
 │   ├── tests/              # Test generation prompts 
-│   └── plugins/            # User-defined plugins (after core support)
-│       ├── coding_guidelines.md  # Example static plugin
-│       └── dump_files.js         # Example dynamic plugin
+│   │   ├── 001_add_tests.md    # Initial test script
+│   │   ├── 002_enhance_tests.md # Logging and real mode tests
+│   │   └── ...
+│   └── plugins/            # User-defined plugins
+│       ├── coding-style.md  # Example static plugin
+│       └── dump_files.js    # Example dynamic plugin
 ├── output/
 │   ├── stages/             # Isolated stage outputs
 │   │   ├── 001/
@@ -87,8 +91,36 @@ For a new vibec project:
 
 Run vibec with:
 ```bash
-node bin/vibec.js --stacks core,tests --test-cmd "npm test" --retries 2 --plugin-timeout 5000 --no-overwrite
+node bin/vibec.js --stacks=core,tests --test-cmd="npm test" --retries=2 --plugin-timeout=5000 --no-overwrite
 ```
+
+Supported CLI options:
+- `--stacks=<stack1,stack2,...>`: Stacks to process (e.g., `core,tests`). Default: `core`.
+- `--no-overwrite`: Prevent file overwrites. Flag, default: false.
+- `--dry-run`: Simulate without changes. Flag, default: false.
+- `--api-url=<url>`: LLM API URL. Default: `https://api.anthropic.com/v1`.
+- `--api-model=<model>`: LLM model. Default: `claude-3-7-sonnet`.
+- `--test-cmd=<command>`: Test command (e.g., `npm test`). Default: none.
+- `--retries=<number>`: Retry count, non-negative integer. Default: 0.
+- `--plugin-timeout=<ms>`: JS plugin timeout in ms, positive integer. Default: 5000.
+- `--output=<dir>`: Output directory. Default: `output`.
+- `--help`: Show usage and exit. Example output:
+  ```
+  Usage: vibec [options]
+  Options:
+    --stacks=<stack1,stack2,...>  Stacks to process (default: core)
+    --no-overwrite                Prevent file overwrites
+    --dry-run                     Simulate without changes
+    --api-url=<url>               LLM API URL
+    --api-model=<model>           LLM model
+    --test-cmd=<command>          Test command
+    --retries=<number>            Retry count
+    --plugin-timeout=<ms>         JS plugin timeout
+    --output=<dir>                Output directory
+    --help                        Show this help
+    --version                     Show version
+  ```
+- `--version`: Show version (e.g., `vibec v1.0.0`) and exit.
 
 ### Configuration
 
@@ -100,24 +132,25 @@ Configure via `vibec.json`:
   "retries": 2,
   "pluginTimeout": 5000,
   "apiUrl": "https://api.openai.com/v1",
-  "apiModel": "gpt-4",
-  "pluginParams": {
-    "dump_files": { "files": ["src/main.js", "README.md"] }
-  }
+  "apiModel": "gpt-4"
 }
 ```
+
+Options are merged with priority: CLI > environment variables > `vibec.json` > defaults. Validation:
+- `retries` must be ≥ 0.
+- `pluginTimeout` must be > 0.
 
 ### Environment Variables
 
 Override config with:
-- `VIBEC_STACKS` - Comma-separated stack list
-- `VIBEC_TEST_CMD` - Test command
-- `VIBEC_RETRIES` - Number of retries
-- `VIBEC_PLUGIN_TIMEOUT` - JS plugin timeout (ms)
-- `VIBEC_API_URL` - LLM API endpoint
-- `VIBEC_API_KEY` - LLM API key (preferred over config)
-- `VIBEC_API_MODEL` - Model for code generation
-- `VIBEC_DEBUG` - Enable debug logging
+- `VIBEC_STACKS`: Comma-separated stack list (e.g., `core,tests`).
+- `VIBEC_TEST_CMD`: Test command.
+- `VIBEC_RETRIES`: Number of retries (e.g., `2`).
+- `VIBEC_PLUGIN_TIMEOUT`: JS plugin timeout in ms (e.g., `5000`).
+- `VIBEC_API_URL`: LLM API endpoint.
+- `VIBEC_API_KEY`: LLM API key (preferred over config).
+- `VIBEC_API_MODEL`: Model for code generation.
+- `VIBEC_DEBUG`: Enable debug logging (`1` to enable).
 
 ### LLM Integration
 
@@ -141,8 +174,8 @@ Description of what to generate.
 ## Plugin System
 
 Plugin support is added via `stacks/core/003_add_plugins.md`. After this stage:
-- **Static Plugins (`.md`)**: Place in `stacks/<stack>/plugins/` (e.g., `stacks/core/plugins/coding_guidelines.md`). Their content appends to every prompt in the stack.
-- **Dynamic Plugins (`.js`)**: Place in `stacks/<stack>/plugins/` (e.g., `stacks/core/plugins/dump_files.js`). Export an async function:
+- **Static Plugins (`.md`)**: Place in `stacks/<stack>/plugins/` (e.g., `stacks/core/plugins/coding-style.md`). Their content appends to every prompt in the stack in alphabetical order.
+- **Dynamic Plugins (`.js`)**: Place in `stacks/<stack>/plugins/` (e.g., `stacks/core/plugins/dump_files.js`). Export an async function with a configurable timeout (default 5000ms):
   ```javascript
   module.exports = async (context) => {
     return "Generated content";
@@ -160,6 +193,7 @@ Plugin support is added via `stacks/core/003_add_plugins.md`. After this stage:
     testResult: { errorCode: 1, stdout: "...", stderr: "..." } // Only during retries
   }
   ```
+- Errors in plugins are logged with `log.error` and skipped without halting execution.
 
 ## Development
 
@@ -172,6 +206,12 @@ Plugin support is added via `stacks/core/003_add_plugins.md`. After this stage:
 ### Self-Improvement
 
 Each stage builds on prior improvements, evolving `vibec.js` during compilation.
+
+### Testing
+
+Tests are generated via `stacks/tests/`:
+- `test.sh` validates `vibec.js` execution and runs `test.js`.
+- `test.js` uses `tape` to verify logging, CLI, plugins, and config (no external dependencies beyond Node builtins).
 
 ## Troubleshooting
 
