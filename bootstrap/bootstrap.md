@@ -7,7 +7,9 @@ Generate a Node.js script with the following exact content:
 - Define bootstrap to:
   - Copy bin/test.sh to output/current/test.sh (chmod 755) if missing
   - Copy bin/vibec.js to output/current/bin/vibec.js (chmod 644) if missing
-  - Run stages 1 to highest, updating vibec.js and test.sh from output/stages/<stage>/
+  - Run stages 1 to highest, updating vibec.js and test.sh from output/stages/<stage>/ 
+    - Use --start and --end args to specify only one stage to run
 - Include console.log statements for progress and errors
+- Print 2 new lines before each stage
 - Wrap bootstrap in a .catch block to handle errors
 Output only the script content, nothing else.
