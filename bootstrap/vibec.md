@@ -2,7 +2,7 @@ Generate a Node.js script with the following exact content:
 - Start with shebang: #!/usr/bin/env node
 - Import fs.promises, path, https, and child_process.execSync
 - Define parseArgs to parse CLI args (e.g., --stacks=core, --dry-run) and env vars (e.g., VIBEC_API_KEY), with defaults like stacks: ['core'], apiUrl 'https://openrouter.ai/api/v1', apiModel 'anthropic/claude-3.7-sonnet', testCmd null
-- Take --start and --end args to specify a range of stages to process. Make sure to convert to numbers before comparing to stage numbers.
+- Include --start and --end args to allow users to specify a range of stages to process (e.g., --start=1 --end=2). Convert to numbers before comparing to stage numbers. These are user-facing for running specific stages and also used by bootstrap.js.
 - API model should be `anthropic/claude-3.7-sonnet` by default (pay attention to exact spelling)
 - LLM URL to query should be `${apiUrl}/chat/completions`. Do not use `new URL` to combine the URL.
 - Use native ES5 fetch API to send POST requests to LLM API
@@ -14,7 +14,8 @@ Generate a Node.js script with the following exact content:
 - Define checkOverwrite to block overwrites if --no-overwrite is set
 - Define writeFiles to save to output/stages/<stage> and output/current/ using numeric stage
 - Define runTests to execute a testCmd if provided
-- Define main to orchestrate: parse args, process prompts from all stacks, write files using prompt.number, run tests, exit on failure
+- Define main to orchestrate: parse args, process prompts from all stacks within --start and --end range, write files using prompt.number, run tests, exit on failure
 - Include console.log statements for progress and errors
+- Export all functions explicitly: module.exports = { parseArgs, getPromptFiles, buildPrompt, processLlm, parseResponse, checkOverwrite, writeFiles, runTests, main }
 - Wrap main in a .catch block to handle errors
 Output only the script content, nothing else.
