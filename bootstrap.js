@@ -1,40 +1,44 @@
 #!/usr/bin/env node
 
-const { promises: fs } = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-async function getHighestStage(projectRoot, stacks = ['core', 'tests']) {
-  let highest = 0;
+async function getHighestStage(stacks = ['core', 'tests']) {
+  let highestStage = 0;
+
   for (const stack of stacks) {
-    const stackDir = path.join(projectRoot, 'stacks', stack);
+    const dir = `stacks/${stack}/`;
     try {
-      const files = await fs.readdir(stackDir);
+      const files = await fs.readdir(dir);
       for (const file of files) {
-        if (/^\d+_.*\.md$/.test(file)) {
-          const stageNum = parseInt(file.split('_')[0], 10);
-          highest = Math.max(highest, stageNum);
+        const match = file.match(/^(\d+)_.*\.md$/);
+        if (match) {
+          const stage = parseInt(match[1], 10);
+          highestStage = Math.max(highestStage, stage);
         }
       }
     } catch (err) {
-      console.error(`Error reading stack directory ${stackDir}:`, err.message);
+      console.error(`Error reading directory ${dir}:`, err);
     }
   }
-  return highest;
+
+  return highestStage;
 }
 
-async function checkNewFile(projectRoot, stage, filename) {
+async function checkNewFile(stage, filename) {
   const paddedStage = String(stage).padStart(3, '0');
-  const filePath = path.join(projectRoot, 'output', 'stages', paddedStage, filename);
+  const filePath = `output/stages/${paddedStage}/${filename}`;
+  
   try {
     await fs.access(filePath);
-    return filePath;
+    return true;
   } catch (err) {
-    return null;
+    return false;
   }
 }
 
-function runStage(projectRoot, vibecPath, stage) {
+function runStage(vibecPath, stage) {
   console.log(`\n\nRunning stage ${stage}...`);
   
   const result = spawnSync('node', [
@@ -44,7 +48,6 @@ function runStage(projectRoot, vibecPath, stage) {
     '--stacks=core,tests',
     '--test-cmd=output/current/test.sh'
   ], {
-    cwd: projectRoot,
     stdio: 'inherit'
   });
   
@@ -53,96 +56,73 @@ function runStage(projectRoot, vibecPath, stage) {
   }
   
   if (result.status !== 0) {
-    throw new Error(`Stage ${stage} exited with code ${result.status}`);
+    throw new Error(`Stage ${stage} failed with exit code ${result.status}`);
   }
   
-  return result.status === 0;
+  return result;
 }
 
 async function bootstrap() {
-  const projectRoot = process.cwd();
-  let startStage = 1;
-  let endStage = null;
+  const args = process.argv.slice(2);
+  const startStageArg = args.find(arg => arg.startsWith('--start='));
+  const endStageArg = args.find(arg => arg.startsWith('--end='));
   
-  // Parse command line arguments
-  for (let i = 2; i < process.argv.length; i++) {
-    const arg = process.argv[i];
-    if (arg.startsWith('--start=')) {
-      startStage = parseInt(arg.split('=')[1], 10);
-    } else if (arg.startsWith('--end=')) {
-      endStage = parseInt(arg.split('=')[1], 10);
-    }
-  }
+  const startStage = startStageArg ? parseInt(startStageArg.split('=')[1], 10) : 1;
+  let endStage = endStageArg ? parseInt(endStageArg.split('=')[1], 10) : await getHighestStage();
   
-  // Ensure output directory exists
-  await fs.mkdir(path.join(projectRoot, 'output', 'current', 'bin'), { recursive: true });
+  console.log(`Bootstrapping stages ${startStage} to ${endStage}`);
   
-  // Copy test.sh if it doesn't exist
-  const testShPath = path.join(projectRoot, 'output', 'current', 'test.sh');
+  // Create necessary directories
+  await fs.mkdir('output/current/bin', { recursive: true });
+  
+  // Copy test script if it doesn't exist
+  const testShPath = 'output/current/test.sh';
   try {
     await fs.access(testShPath);
     console.log('test.sh already exists, skipping copy');
   } catch (err) {
     console.log('Copying test.sh...');
-    await fs.copyFile(
-      path.join(projectRoot, 'bin', 'test.sh'),
-      testShPath
-    );
+    await fs.copyFile('bin/test.sh', testShPath);
     await fs.chmod(testShPath, 0o755);
   }
   
   // Copy vibec.js if it doesn't exist
-  const vibecPath = path.join(projectRoot, 'output', 'current', 'bin', 'vibec.js');
+  const vibecPath = 'output/current/bin/vibec.js';
   try {
     await fs.access(vibecPath);
     console.log('vibec.js already exists, skipping copy');
   } catch (err) {
     console.log('Copying vibec.js...');
-    await fs.copyFile(
-      path.join(projectRoot, 'bin', 'vibec.js'),
-      vibecPath
-    );
+    await fs.mkdir(path.dirname(vibecPath), { recursive: true });
+    await fs.copyFile('bin/vibec.js', vibecPath);
     await fs.chmod(vibecPath, 0o644);
   }
   
-  // Find the highest stage
-  const highestStage = await getHighestStage(projectRoot);
-  console.log(`Highest stage found: ${highestStage}`);
-  
-  if (endStage === null) {
-    endStage = highestStage;
-  }
-  
-  // Run each stage sequentially
+  // Run each stage
   for (let stage = startStage; stage <= endStage; stage++) {
-    if (await runStage(projectRoot, vibecPath, stage)) {
-      // Update vibec.js if a new version is available
-      const newVibecPath = await checkNewFile(projectRoot, stage, 'bin/vibec.js');
-      if (newVibecPath) {
-        console.log(`Updating vibec.js from stage ${stage}`);
-        await fs.copyFile(newVibecPath, vibecPath);
-        await fs.chmod(vibecPath, 0o644);
-      }
-      
-      // Update test.sh if a new version is available
-      const newTestShPath = await checkNewFile(projectRoot, stage, 'test.sh');
-      if (newTestShPath) {
-        console.log(`Updating test.sh from stage ${stage}`);
-        await fs.copyFile(newTestShPath, testShPath);
-        await fs.chmod(testShPath, 0o755);
-      }
-      
-      console.log(`Stage ${stage} completed successfully`);
-    } else {
-      console.error(`Stage ${stage} failed`);
-      process.exit(1);
+    runStage(vibecPath, stage);
+    
+    // Update vibec.js if a new version exists
+    if (await checkNewFile(stage, 'bin/vibec.js')) {
+      console.log(`Updating vibec.js from stage ${stage}...`);
+      const paddedStage = String(stage).padStart(3, '0');
+      await fs.copyFile(`output/stages/${paddedStage}/bin/vibec.js`, vibecPath);
+      await fs.chmod(vibecPath, 0o644);
+    }
+    
+    // Update test.sh if a new version exists
+    if (await checkNewFile(stage, 'test.sh')) {
+      console.log(`Updating test.sh from stage ${stage}...`);
+      const paddedStage = String(stage).padStart(3, '0');
+      await fs.copyFile(`output/stages/${paddedStage}/test.sh`, testShPath);
+      await fs.chmod(testShPath, 0o755);
     }
   }
   
-  console.log('All stages completed successfully');
+  console.log('Bootstrap complete!');
 }
 
 bootstrap().catch(err => {
-  console.error('Error:', err.message);
+  console.error('Bootstrap failed:', err);
   process.exit(1);
 });

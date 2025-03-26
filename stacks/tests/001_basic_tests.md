@@ -4,7 +4,7 @@ Generate and enhance a test script for vibec:
 - Create `test.sh` with:
   - Start with `#!/bin/bash` and `set -ex` for debugging.
   - Verify `output/current/bin/vibec.js` exists.
-  - Run `node bin/vibec.js --dry-run > test-output.txt` to ensure it executes without errors, writing to test-output.txt in output/current/.
+  - Run `node bin/vibec.js --dry-run > test-output.txt` to ensure it executes without errors, writing to test-output.txt in output/current/. Don't change current directory.
     - In --dry-run mode, expect it to print the prompt and return 'File: example/file\n```lang\ncontent\n```'.
   - Run `node test.js` to execute TAP tests.
 - Add `test.js` to validate logging and real mode:
