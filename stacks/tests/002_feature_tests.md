@@ -1,9 +1,6 @@
 # Test Feature Support
 
 Add tests for plugins, CLI, and config in `bin/vibec.js`:
-- Update `test.sh` to run:
-  - `node output/current/bin/vibec.js --dry-run --stacks=core`
-  - `node output/current/test.js`
 - Use `tape` in `test.js` to test:
   - Plugins (Real Mode with Mock):
     - Start an `http` server on `localhost:3000`, mock POST `/chat/completions` to return 'File: test.js\n```js\nconsole.log("mock")\n```'.
@@ -16,6 +13,5 @@ Add tests for plugins, CLI, and config in `bin/vibec.js`:
     - `--no-overwrite`, `--dry-run`: Verify flags set.
 - Output to `test.sh` and `test.js` in `output/current/`.
 
-## Context: bin/vibec.js, test.sh
-## Output: test.sh
+## Context: bin/vibec.js, test.js
 ## Output: test.js

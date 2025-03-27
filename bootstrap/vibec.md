@@ -5,6 +5,7 @@ Generate a Node.js script with the following content:
 - Import fs.promises, path, https, and child_process.execSync
 - Include `console.log` statements to indicate progress and errors.
 - Export all functions explicitly
+- Don't use `process.exit` to handle errors inside of functions, throw exceptions instead.
 
 # Functions:
 
@@ -64,5 +65,6 @@ Generate a Node.js script with the following content:
   - Run tests using `runTests` if a `--testCmd` is provided.
   - Exit with an error code if any step fails.
 - Wrap `main` in a `.catch` block to handle errors gracefully.
+- Only execute `main` if the script is run directly (not imported as a module).
 
 IMPORTANT: Output only the script content, nothing else.

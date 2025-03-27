@@ -18,5 +18,5 @@ Add tests for expanded CLI support in `bin/vibec.js`:
     - Run `main()` with `--dry-run --api-url=http://localhost:3000`, verify no real LLM call, outputs mock response.
 - Use `node` explicitly, no real LLM calls.
 
-## Context: bin/vibec.js, test.sh
+## Context: bin/vibec.js, test.js
 ## Output: test.js
