@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# bin/vibec - Launch the latest bootstrapped vibec.js with provided arguments
+# Usage: ./bin/vibec [args...]
+
+# Exit on any error
+set -e
+
+# Define the latest bootstrapped vibec.js location
+LATEST_VIBEC_JS="output/current/bin/vibec.js"
+
+# Check if the latest vibec.js exists
+if [[ ! -f "$LATEST_VIBEC_JS" ]]; then
+  echo "Error: Latest bootstrapped vibec.js not found at $LATEST_VIBEC_JS" >&2
+  exit 1
+fi
+
+# Inform user which file is being used
+echo "Using latest bootstrapped vibec.js from: $LATEST_VIBEC_JS"
+
+# Launch vibec.js with all provided arguments using Node.js
+node "$LATEST_VIBEC_JS" "$@"
+
+exit 0
