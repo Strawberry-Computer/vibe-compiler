@@ -16,9 +16,7 @@ Add tests for expanded CLI support in `bin/vibec.js`:
     - Env Var Merge: Set `VIBEC_API_URL`, verify CLI `--api-url` overrides it.
   - Dry-Run Execution:
     - Run `main()` with `--dry-run --api-url=http://localhost:3000`, verify no real LLM call, outputs mock response.
-- Output to `test.sh` and `test.js` in `output/current/`.
 - Use `node` explicitly, no real LLM calls.
 
 ## Context: bin/vibec.js, test.sh
-## Output: test.sh
 ## Output: test.js

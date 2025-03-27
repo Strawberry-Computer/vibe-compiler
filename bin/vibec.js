@@ -1,53 +1,85 @@
 #!/usr/bin/env node
 
-const { promises: fs } = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
 const https = require('https');
 const { execSync } = require('child_process');
 
-function parseArgs(argv) {
-  const args = argv.slice(2);
+/**
+ * Parse command line arguments
+ * @param {string[]} args - Command line arguments
+ * @returns {Object} Parsed options
+ */
+function parseArgs(args) {
   const options = {
     stacks: ['core'],
-    'dry-run': false,
+    dryRun: false,
     start: null,
     end: null,
-    'no-overwrite': false,
-    'api-url': 'https://openrouter.ai/api/v1',
-    model: 'anthropic/claude-3.7-sonnet',
-    'test-cmd': null
+    noOverwrite: false,
+    apiUrl: 'https://openrouter.ai/api/v1',
+    apiKey: null,
+    apiModel: 'anthropic/claude-3.7-sonnet',
+    testCmd: null,
   };
 
-  for (let i = 0; i < args.length; i++) {
+  for (let i = 2; i < args.length; i++) {
     const arg = args[i];
+    
     if (arg.startsWith('--')) {
-      const option = arg.slice(2);
-      if (option.includes('=')) {
-        const [key, value] = option.split('=');
+      // Handle --option=value syntax
+      if (arg.includes('=')) {
+        const [key, value] = arg.substring(2).split('=');
+        
         if (key === 'stacks') {
-          options[key] = value.split(',');
-        } else if (key === 'start' || key === 'end') {
-          options[key] = parseInt(value, 10);
-        } else if (key === 'dry-run' || key === 'no-overwrite') {
-          options[key] = value === 'true';
-        } else {
-          options[key] = value;
+          options.stacks = value.split(',');
+        } else if (key === 'dry-run') {
+          options.dryRun = value !== 'false';
+        } else if (key === 'start') {
+          options.start = parseInt(value, 10);
+        } else if (key === 'end') {
+          options.end = parseInt(value, 10);
+        } else if (key === 'no-overwrite') {
+          options.noOverwrite = value !== 'false';
+        } else if (key === 'api-url') {
+          options.apiUrl = value;
+        } else if (key === 'api-key') {
+          options.apiKey = value;
+        } else if (key === 'api-model') {
+          options.apiModel = value;
+        } else if (key === 'test-cmd') {
+          options.testCmd = value;
         }
-      } else if (i + 1 < args.length && !args[i + 1].startsWith('--')) {
-        const value = args[i + 1];
-        const key = option;
-        if (key === 'stacks') {
-          options[key] = value.split(',');
-        } else if (key === 'start' || key === 'end') {
-          options[key] = parseInt(value, 10);
-        } else if (key === 'dry-run' || key === 'no-overwrite') {
-          options[key] = value === 'true';
-        } else {
-          options[key] = value;
+      } 
+      // Handle boolean flags without values
+      else if (arg === '--dry-run') {
+        options.dryRun = true;
+      } else if (arg === '--no-overwrite') {
+        options.noOverwrite = true;
+      } 
+      // Handle --option value syntax
+      else {
+        const key = arg.substring(2);
+        const nextArg = args[i + 1];
+        
+        if (i + 1 < args.length && !nextArg.startsWith('--')) {
+          if (key === 'stacks') {
+            options.stacks = nextArg.split(',');
+          } else if (key === 'start') {
+            options.start = parseInt(nextArg, 10);
+          } else if (key === 'end') {
+            options.end = parseInt(nextArg, 10);
+          } else if (key === 'api-url') {
+            options.apiUrl = nextArg;
+          } else if (key === 'api-key') {
+            options.apiKey = nextArg;
+          } else if (key === 'api-model') {
+            options.apiModel = nextArg;
+          } else if (key === 'test-cmd') {
+            options.testCmd = nextArg;
+          }
+          i++;
         }
-        i++;
-      } else {
-        options[option] = true;
       }
     }
   }
@@ -55,125 +87,158 @@ function parseArgs(argv) {
   return options;
 }
 
-async function getPromptFiles(stacks) {
+/**
+ * Get prompt files from stacks
+ * @param {string[]} stacks - Array of stack names
+ * @param {number|null} start - Starting stage number
+ * @param {number|null} end - Ending stage number
+ * @returns {Promise<Array<{stack: string, file: string, number: number}>>} Array of prompt file objects
+ */
+async function getPromptFiles(stacks, start, end) {
   const result = [];
-  
+
   for (const stack of stacks) {
-    const stackDir = path.join('stacks', stack);
-    let files;
-    
     try {
-      files = await fs.readdir(stackDir);
-    } catch (err) {
-      console.error(`Error reading stack directory ${stackDir}:`, err);
-      continue;
-    }
-    
-    for (const file of files) {
-      const match = file.match(/^(\d+)_.*\.md$/);
-      if (match) {
-        result.push({
-          stack,
-          file,
-          number: parseInt(match[1], 10)
-        });
+      const stackPath = path.join('stacks', stack);
+      const files = await fs.readdir(stackPath);
+      
+      // Filter files matching pattern ###_*.md
+      const promptFiles = files.filter(file => /^\d+_.*\.md$/.test(file));
+      
+      for (const file of promptFiles) {
+        const match = file.match(/^(\d+)_/);
+        if (match) {
+          const number = parseInt(match[1], 10);
+          
+          // Apply start/end filters if provided
+          if ((start === null || number >= start) && 
+              (end === null || number <= end)) {
+            result.push({
+              stack,
+              file: path.join(stackPath, file),
+              number
+            });
+          }
+        }
       }
+    } catch (error) {
+      console.error(`Error scanning stack ${stack}: ${error.message}`);
     }
   }
-  
+
+  // Sort by number
   return result.sort((a, b) => a.number - b.number);
 }
 
-async function buildPrompt(stackFile) {
-  const filePath = path.join('stacks', stackFile.stack, stackFile.file);
-  let content;
-  
+/**
+ * Build a prompt by reading the file and appending context
+ * @param {string} filePath - Path to the prompt file
+ * @returns {Promise<string>} The complete prompt with context
+ */
+async function buildPrompt(filePath) {
   try {
-    content = await fs.readFile(filePath, 'utf8');
-  } catch (err) {
-    console.error(`Error reading file ${filePath}:`, err);
-    throw err;
-  }
-  
-  // Extract context files from the prompt
-  const contextMatch = content.match(/## Context: (.*?)$/m);
-  if (contextMatch) {
+    // Read the prompt file
+    const content = await fs.readFile(filePath, 'utf8');
+    
+    // Check if there are context files to include
+    const contextMatch = content.match(/## Context: (.+)/);
+    if (!contextMatch) {
+      return content;
+    }
+    
+    // Parse the list of context files
     const contextFiles = contextMatch[1].split(',').map(f => f.trim());
     let contextContent = '';
     
+    // Read each context file from output/current/
     for (const contextFile of contextFiles) {
       try {
         const contextFilePath = path.join('output', 'current', contextFile);
         const fileContent = await fs.readFile(contextFilePath, 'utf8');
-        contextContent += `## File: ${contextFile}\n${fileContent}\n\n`;
-      } catch (err) {
-        console.warn(`Warning: Could not read context file ${contextFile}:`, err);
+        contextContent += `\n\n### ${contextFile}\n\`\`\`\n${fileContent}\n\`\`\``;
+      } catch (error) {
+        console.warn(`Warning: Could not read context file ${contextFile}: ${error.message}`);
       }
     }
     
-    // Replace the Context line with the actual content
-    content = content.replace(/## Context: .*$/m, `## Context:\n${contextContent}`);
+    // Replace the context marker with the actual content
+    return content.replace(/## Context: .+/, `## Context:${contextContent}`);
+    
+  } catch (error) {
+    console.error(`Error building prompt from ${filePath}: ${error.message}`);
+    throw error;
   }
-  
-  return content;
 }
 
+/**
+ * Process a prompt through LLM API
+ * @param {string} prompt - The prompt to process
+ * @param {Object} options - API options
+ * @returns {Promise<string>} The LLM response
+ */
 async function processLlm(prompt, options) {
-  if (options['dry-run']) {
-    console.log('Dry run mode, prompt:');
-    console.log('-'.repeat(80));
+  if (options.dryRun) {
+    console.log('DRY RUN: Would send the following prompt to LLM API:');
+    console.log('-------------------');
     console.log(prompt);
-    console.log('-'.repeat(80));
+    console.log('-------------------');
     return 'File: example/file\n```lang\ncontent\n```';
   }
   
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    throw new Error('OPENROUTER_API_KEY environment variable not set');
+  if (!options.apiKey) {
+    throw new Error('API key is required. Please provide --api-key.');
   }
-  
-  const requestData = {
-    model: options.model,
-    messages: [
-      {
-        role: 'system',
-        content: 'Generate code files in this exact format for each file: "File: path/to/file\n```lang\ncontent\n```". Ensure every response includes ALL files requested in the prompt\'s ## Output: sections. Do not skip any requested outputs.'
+
+  try {
+    console.log(`Sending request to LLM API: ${options.apiUrl}`);
+    
+    const response = await fetch(`${options.apiUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${options.apiKey}`
       },
-      {
-        role: 'user',
-        content: prompt
-      }
-    ]
-  };
-  
-  const response = await fetch(`${options['api-url']}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': 'https://prompting.com',
-      'X-Title': 'Prompt Processor'
-    },
-    body: JSON.stringify(requestData)
-  });
-  
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`API request failed: ${response.status} ${error}`);
+      body: JSON.stringify({
+        model: options.apiModel,
+        messages: [
+          {
+            role: 'system',
+            content: 'Generate code files in this exact format for each file: "File: path/to/file\n```lang\ncontent\n```". Ensure every response includes ALL files requested in the prompt\'s ## Output: sections. Do not skip any requested outputs.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ]
+      })
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`API request failed with status ${response.status}: ${errorText}`);
+    }
+    
+    const data = await response.json();
+    return data.choices[0].message.content;
+  } catch (error) {
+    console.error(`Error processing through LLM: ${error.message}`);
+    throw error;
   }
-  
-  const data = await response.json();
-  return data.choices[0].message.content;
 }
 
+/**
+ * Parse response to extract files
+ * @param {string} response - The LLM response
+ * @returns {Array<{path: string, content: string}>} Array of file objects
+ */
 function parseResponse(response) {
   const files = [];
-  const regex = /File: (.+?)\n```(?:\w+)?\n([\s\S]+?)\n```/g;
-  let match;
+  const fileRegex = /File: (.+?)\n```(?:\w+)?\n([\s\S]+?)\n```/g;
   
-  while ((match = regex.exec(response)) !== null) {
+  let match;
+  while ((match = fileRegex.exec(response)) !== null) {
     files.push({
-      path: match[1],
+      path: match[1].trim(),
       content: match[2]
     });
   }
@@ -181,121 +246,138 @@ function parseResponse(response) {
   return files;
 }
 
-async function checkOverwrite(files, noOverwrite) {
-  if (!noOverwrite) return true;
-  
-  const currentDir = path.join('output', 'current');
-  let canProceed = true;
-  
+/**
+ * Check if files would be overwritten
+ * @param {Array<{path: string, content: string}>} files - Array of file objects
+ * @param {number} stage - The current stage number
+ * @returns {Promise<boolean>} True if overwrites would occur
+ */
+async function checkOverwrite(files, stage) {
   for (const file of files) {
-    const filePath = path.join(currentDir, file.path);
+    const currentPath = path.join('output', 'current', file.path);
     try {
-      await fs.access(filePath);
-      console.warn(`File ${filePath} already exists and --no-overwrite is set`);
-      canProceed = false;
-    } catch (err) {
-      // File doesn't exist, which is fine
+      await fs.access(currentPath);
+      // File exists
+      return true;
+    } catch (error) {
+      // File doesn't exist, continue checking
     }
   }
-  
-  return canProceed;
+  return false;
 }
 
+/**
+ * Write files to output directories
+ * @param {Array<{path: string, content: string}>} files - Array of file objects
+ * @param {number} stage - The current stage number
+ * @returns {Promise<void>}
+ */
 async function writeFiles(files, stage) {
-  const stageDir = path.join('output', 'stages', stage.toString());
-  const currentDir = path.join('output', 'current');
-  
-  // Create directories
+  // Create stage directory
+  const stageDir = path.join('output', 'stages', `${stage}`);
   await fs.mkdir(stageDir, { recursive: true });
-  await fs.mkdir(currentDir, { recursive: true });
   
   for (const file of files) {
-    const stageFilePath = path.join(stageDir, file.path);
-    const currentFilePath = path.join(currentDir, file.path);
+    const stagePath = path.join(stageDir, file.path);
+    const currentPath = path.join('output', 'current', file.path);
     
     // Create parent directories
-    await fs.mkdir(path.dirname(stageFilePath), { recursive: true });
-    await fs.mkdir(path.dirname(currentFilePath), { recursive: true });
+    await fs.mkdir(path.dirname(stagePath), { recursive: true });
+    await fs.mkdir(path.dirname(currentPath), { recursive: true });
     
     // Write files
-    await fs.writeFile(stageFilePath, file.content);
-    await fs.writeFile(currentFilePath, file.content);
+    await fs.writeFile(stagePath, file.content);
+    await fs.writeFile(currentPath, file.content);
     
-    console.log(`Written: ${file.path}`);
+    console.log(`Wrote file: ${currentPath}`);
   }
 }
 
+/**
+ * Run tests if test command is provided
+ * @param {string|null} testCmd - The test command to execute
+ * @returns {boolean} True if tests passed
+ */
 function runTests(testCmd) {
   if (!testCmd) return true;
   
   try {
     console.log(`Running tests: ${testCmd}`);
     execSync(testCmd, { stdio: 'inherit' });
+    console.log('Tests passed');
     return true;
-  } catch (err) {
-    console.error('Tests failed:', err);
+  } catch (error) {
+    console.error('Tests failed:', error.message);
     return false;
   }
 }
 
-async function main() {
-  const options = parseArgs(process.argv);
-  console.log('Options:', options);
+/**
+ * Main function to orchestrate the process
+ * @param {string[]} args - Command line arguments
+ * @returns {Promise<void>}
+ */
+async function main(args) {
+  const options = parseArgs(args);
+  console.log(`Processing stacks: ${options.stacks.join(', ')}`);
   
-  // Get all prompt files from specified stacks
-  const promptFiles = await getPromptFiles(options.stacks);
-  console.log(`Found ${promptFiles.length} prompt files`);
+  // Get prompt files
+  const promptFiles = await getPromptFiles(options.stacks, options.start, options.end);
+  if (promptFiles.length === 0) {
+    console.log('No prompt files found matching criteria.');
+    return;
+  }
   
-  // Filter by start and end if provided
-  const filteredFiles = promptFiles.filter(file => {
-    if (options.start !== null && file.number < options.start) return false;
-    if (options.end !== null && file.number > options.end) return false;
-    return true;
-  });
+  console.log(`Found ${promptFiles.length} prompt files to process`);
   
-  console.log(`Processing ${filteredFiles.length} files within range`);
-  
-  for (const promptFile of filteredFiles) {
-    console.log(`Processing ${promptFile.stack}/${promptFile.file} (stage ${promptFile.number})`);
+  // Process each file
+  for (const promptFile of promptFiles) {
+    console.log(`Processing ${promptFile.file} (Stage ${promptFile.number})`);
     
-    // Build the prompt with context
-    const prompt = await buildPrompt(promptFile);
+    // Build prompt
+    const prompt = await buildPrompt(promptFile.file);
     
-    // Process with LLM
+    // Process through LLM
     const response = await processLlm(prompt, options);
     
-    // Parse the response
+    // Parse response
     const files = parseResponse(response);
     console.log(`Extracted ${files.length} files from response`);
     
-    // Check for overwrites if --no-overwrite is set
-    const canProceed = await checkOverwrite(files, options['no-overwrite']);
-    if (!canProceed) {
-      console.error('Stopping due to potential overwrites');
-      process.exit(1);
+    // Check for overwrites
+    if (options.noOverwrite && await checkOverwrite(files, promptFile.number)) {
+      console.log('Skipping due to --no-overwrite flag and files would be overwritten');
+      continue;
     }
     
-    // Write files to output/stages/<stage> and output/current/
-    await writeFiles(files, promptFile.number);
+    // Write files
+    if (!options.dryRun) {
+      await writeFiles(files, promptFile.number);
+    } else {
+      console.log('DRY RUN: Would write the following files:');
+      for (const file of files) {
+        console.log(`- ${file.path}`);
+      }
+    }
     
-    // Run tests if provided
-    if (options['test-cmd']) {
-      const testsPassed = runTests(options['test-cmd']);
-      if (!testsPassed) {
-        console.error('Tests failed, stopping');
+    // Run tests
+    if (!options.dryRun && options.testCmd) {
+      if (!runTests(options.testCmd)) {
         process.exit(1);
       }
     }
   }
   
-  console.log('All files processed successfully');
+  console.log('Processing completed successfully');
 }
 
-main().catch(err => {
-  console.error('Error:', err);
+// Execute main function
+main(process.argv).catch(error => {
+  console.error('Error:', error.message);
   process.exit(1);
 });
 
+// Export functions
 module.exports = {
   parseArgs,
   getPromptFiles,

@@ -17,7 +17,7 @@ Add `vibec.json` loading to vibec.js, merging with existing CLI and env vars (pr
 - `retries`: Integer, retry count. Default: `0`.
 - `pluginTimeout`: Integer, plugin timeout in ms. Default: `5000`.
 
-## Environment Variables (already in vibec.js, listed for reference)
+## Environment Variables
 - `VIBEC_STACKS`: Comma-separated stacks (e.g., `core,tests`).
 - `VIBEC_NO_OVERWRITE`: `true`/`false`.
 - `VIBEC_DRY_RUN`: `true`/`false`.
@@ -37,3 +37,7 @@ Add `vibec.json` loading to vibec.js, merging with existing CLI and env vars (pr
   "apiUrl": "https://api.openai.com/v1",
   "apiModel": "gpt-4"
 }
+
+
+## Context: bin/vibec.js
+## Output: bin/vibec.js
