@@ -16,22 +16,22 @@ vibec/
 ├── bootstrap.js            # Progressive bootstrapping script
 ├── stacks/
 │   ├── core/               # Core functionality prompts
-│   │   ├── 001_add_exports.md  # Exports for testing
-│   │   ├── 002_add_logging.md  # Colored logging
-│   │   ├── 003_add_plugins.md  # Plugin support
-│   │   ├── 004_add_cli.md      # CLI enhancements
-│   │   └── 005_add_config.md   # Config loading
+│   │   ├── 001_add_logging.md  # Colored logging
+│   │   ├── 002_add_plugins.md  # Plugin support
+│   │   ├── 003_add_cli.md      # Expanded CLI options
+│   │   ├── 004_add_config.md   # Config loading
+│   │   └── plugins/            # User-defined plugins
+│   │       └── coding-style.md # Example static plugin
 │   ├── tests/              # Test generation prompts 
-│   │   ├── 001_add_tests.md    # Initial test script
-│   │   ├── 002_enhance_tests.md # Logging and real mode tests
-│   │   └── ...
-│   └── plugins/            # User-defined plugins
-│       ├── coding-style.md  # Example static plugin
-│       └── dump_files.js    # Example dynamic plugin
+│   │   ├── 001_basic_tests.md  # Basic execution and logging tests
+│   │   ├── 002_feature_tests.md # Plugin and CLI feature tests
+│   │   ├── 003_cli_tests.md    # Expanded CLI tests
+│   │   └── 004_config_tests.md # Configuration tests
+│   └── plugins/            # Additional plugins (optional)
 ├── output/
 │   ├── stages/             # Isolated stage outputs
-│   │   ├── 001/
-│   │   ├── 002/
+│   │   ├── 1/
+│   │   ├── 2/
 │   │   └── ...
 │   └── current/            # Latest merged output
 ├── .vibec_hashes.json      # Tracks prompt hashes and test results
@@ -91,7 +91,7 @@ For a new vibec project:
 
 Run vibec with:
 ```bash
-node bin/vibec.js --stacks=core,tests --test-cmd="npm test" --retries=2 --plugin-timeout=5000 --no-overwrite
+node bin/vibec.js --stacks=core,tests --test-cmd="npm test" --retries=2 --plugin-timeout=5000 --output=output
 ```
 
 Supported CLI options:
@@ -173,9 +173,9 @@ Description of what to generate.
 
 ## Plugin System
 
-Plugin support is added via `stacks/core/003_add_plugins.md`. After this stage:
+Plugin support is added via `stacks/core/002_add_plugins.md`. After this stage:
 - **Static Plugins (`.md`)**: Place in `stacks/<stack>/plugins/` (e.g., `stacks/core/plugins/coding-style.md`). Their content appends to every prompt in the stack in alphabetical order.
-- **Dynamic Plugins (`.js`)**: Place in `stacks/<stack>/plugins/` (e.g., `stacks/core/plugins/dump_files.js`). Export an async function with a configurable timeout (default 5000ms):
+- **Dynamic Plugins (`.js`)**: Place in `stacks/<stack>/plugins/`. Export an async function with a configurable timeout (default 5000ms):
   ```javascript
   module.exports = async (context) => {
     return "Generated content";
@@ -199,7 +199,7 @@ Plugin support is added via `stacks/core/003_add_plugins.md`. After this stage:
 
 ### Adding New Prompts
 
-1. Create a new file in a stack (e.g., `stacks/core/007_feature.md`).
+1. Create a new file in a stack (e.g., `stacks/core/005_feature.md`).
 2. Use `NNN_name.md` naming with numerical prefix.
 3. Define outputs with `## Output: path/to/file.js`.
 
@@ -211,7 +211,7 @@ Each stage builds on prior improvements, evolving `vibec.js` during compilation.
 
 Tests are generated via `stacks/tests/`:
 - `test.sh` validates `vibec.js` execution and runs `test.js`.
-- `test.js` uses `tape` to verify logging, CLI, plugins, and config (no external dependencies beyond Node builtins).
+- `test.js` uses `tape` to verify logging, plugins, CLI, and config (no external dependencies beyond Node builtins).
 
 ## Troubleshooting
 
