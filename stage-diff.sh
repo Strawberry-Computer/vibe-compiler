@@ -19,19 +19,18 @@ validate_stage() {
   
   if [[ "$stage" == "current" ]]; then
     if [[ ! -d "output/current" ]]; then
-      echo "Error: output/current directory not found"
+      echo "Error: output/current directory not found" >&2
       exit 1
     fi
     echo "output/current"
   else
-    # Check if the stage is a 3-digit number
-    if [[ ! "$stage" =~ ^[0-9]{3}$ ]]; then
-      echo "Error: Stage must be a 3-digit number (like 001, 002) or 'current'"
+    # Accept 1-3 digit numbers and use original name
+    if [[ ! "$stage" =~ ^[0-9]{1,3}$ ]]; then
+      echo "Error: Stage must be a number (1-999) or 'current'" >&2
       exit 1
     fi
-    
     if [[ ! -d "output/stages/$stage" ]]; then
-      echo "Error: output/stages/$stage directory not found"
+      echo "Error: output/stages/$stage directory not found" >&2
       exit 1
     fi
     echo "output/stages/$stage"
@@ -40,8 +39,8 @@ validate_stage() {
 
 # Function to get all available stages in order
 get_all_stages() {
-  # Find all stage directories and extract stage numbers
-  find output/stages -maxdepth 1 -type d -name "[0-9][0-9][0-9]" | 
+  # Find all stage directories with 1-3 digits and sort numerically
+  find output/stages -maxdepth 1 -type d -name "[0-9]*" | 
     sed -e 's|output/stages/||' | 
     sort -n
 }
@@ -95,14 +94,17 @@ find_prompt_files() {
     return
   fi
   
-  # Find all prompt files in all stack directories
-  find ./stacks -type f -name "${stage_num}_*.md" | sort
+  # Match stage number with or without leading zeros
+  local normalized=$(printf "%03d" "$stage_num")
+  find ./stacks -type f -name "[0-9]*_*.md" | 
+    grep -E "/(${stage_num}|${normalized})_" | 
+    sort
 }
 
 # Function to extract and format prompt content
 format_prompt_content() {
   local file=$1
-  local content=$(cat "$file" | sed 's/</\&lt;/g; s/>/\&gt;/g')
+  local content=$(cat "$file" | sed 's/</\</g; s/>/\>/g')
   local relative_path=${file#./}
   
   echo "<div class=\"prompt-container\">"
@@ -298,13 +300,12 @@ for ((i=0; i<total_stages; i++)); do
         next_stage="${all_stages[$((i+1))]}"
         next_anchor=$(generate_anchor_id "$next_stage")
         next_name=$(format_stage_name "$next_stage")
-        echo "    <a href=\"#${next_anchor}\">Next: ${next_name} &rarr;</a>"
+        echo "    <a href=\"#${next_anchor}\">Next: ${next_name} →</a>"
       else
         echo "    <span></span>"
       fi
       echo "  </div>"
       
-      # Show prompt content for
       # Show prompt content for the current stage
       prompt_files=($(find_prompt_files "$current_stage"))
       if [[ ${#prompt_files[@]} -gt 0 ]]; then
@@ -363,7 +364,7 @@ for ((i=0; i<total_stages; i++)); do
     # Navigation
     echo "  <div class=\"stage-navigation\">"
     if [[ $i -gt 0 ]]; then
-      echo "    <a href=\"#${previous_anchor}\">&larr; Previous: ${previous_name}</a>"
+      echo "    <a href=\"#${previous_anchor}\">← Previous: ${previous_name}</a>"
     else
       echo "    <span></span>"
     fi
@@ -371,7 +372,7 @@ for ((i=0; i<total_stages; i++)); do
       next_stage="${all_stages[$((i+1))]}"
       next_anchor=$(generate_anchor_id "$next_stage")
       next_name=$(format_stage_name "$next_stage")
-      echo "    <a href=\"#${next_anchor}\">Next: ${next_name} &rarr;</a>"
+      echo "    <a href=\"#${next_anchor}\">Next: ${next_name} →</a>"
     else
       echo "    <span></span>"
     fi
@@ -417,7 +418,7 @@ for ((i=0; i<total_stages; i++)); do
         current_file="$current_path/$file"
         echo "      <h4>$file</h4>"
         echo "      <pre class=\"diff-added\">"
-        cat "$current_file" | sed 's/</\&lt;/g; s/>/\&gt;/g' | while read -r line; do
+        cat "$current_file" | sed 's/</\</g; s/>/\>/g' | while read -r line; do
           echo "+ $line"
         done
         echo "      </pre>"
@@ -455,7 +456,7 @@ for ((i=0; i<total_stages; i++)); do
         previous_file="$previous_path/$file"
         echo "      <h4>$file</h4>"
         echo "      <pre class=\"diff-removed\">"
-        cat "$previous_file" | sed 's/</\&lt;/g; s/>/\&gt;/g' | while read -r line; do
+        cat "$previous_file" | sed 's/</\</g; s/>/\>/g' | while read -r line; do
           echo "- $line"
         done
         echo "      </pre>"
@@ -498,7 +499,7 @@ for ((i=0; i<total_stages; i++)); do
         echo "      <h4>$file</h4>"
         echo "      <pre>"
         # Generate diff and colorize output
-        diff -u "$previous_file" "$current_file" | tail -n +3 | sed 's/</\&lt;/g; s/>/\&gt;/g' | while read -r line; do
+        diff -u "$previous_file" "$current_file" | tail -n +3 | sed 's/</\</g; s/>/\>/g' | while read -r line; do
           if [[ $line == -* ]]; then
             echo "<span class=\"diff-removed\">$line</span>"
           elif [[ $line == +* ]]; then
