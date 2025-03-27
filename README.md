@@ -51,47 +51,26 @@ Vibec uses a progressive bootstrapping approach:
 
 ### Installation
 
-1. Clone this repository:
+To use `vibec` for your own projects:
+1. Install it globally:
    ```bash
-   git clone https://github.com/vgrichina/vibec.git
-   cd vibec
+   npm install -g vibec
+   ```
+   Or use `npx` without installing:
+   ```bash
+   npx vibec --version
    ```
 
-2. Install dependencies (minimal, only if needed):
-   ```bash
-   npm install
-   ```
-
-3. Set up your API key for LLM integration:
+2. Set up your API key for LLM integration:
    ```bash
    export VIBEC_API_KEY=your_api_key_here
    ```
-
-4. Run the bootstrap process:
-   ```bash
-   npm run bootstrap
-   # or directly
-   node bootstrap.js
-   ```
-
-   The bootstrap process:
-   - Starts with `bin/vibec.js` (must exist).
-   - Processes each stage (001, 002, etc.) using the current best `vibec.js`.
-   - Updates to a new implementation if generated, improving itself throughout.
-
-### First-time Setup
-
-For a new vibec project:
-1. Ensure a base implementation exists in `bin/vibec.js`.
-2. Create prompt stacks in `stacks/` with numerical prefixes (e.g., `001_feature.md`).
-3. Add optional plugins in `stacks/plugins/` after plugin support is enabled.
-4. Run the bootstrap process to generate the full implementation.
 
 ### Usage
 
 Run vibec with:
 ```bash
-node bin/vibec.js --stacks=core,tests --test-cmd="npm test" --retries=2 --plugin-timeout=5000 --output=output
+npx vibec --stacks=core,tests --test-cmd="npm test" --retries=2 --plugin-timeout=5000 --output=output
 ```
 
 Supported CLI options:
@@ -213,20 +192,101 @@ Tests are generated via `stacks/tests/`:
 - `test.sh` validates `vibec.js` execution and runs `test.js`.
 - `test.js` uses `tape` to verify logging, plugins, CLI, and config (no external dependencies beyond Node builtins).
 
+## Tutorial: Building a Simple Pong Game
+
+Here’s how to use `vibec` to create a basic web-based Pong game from scratch:
+
+### Step 1: Set Up a New Project
+Create a new directory for your game:
+```bash
+mkdir pong-game
+cd pong-game
+mkdir stacks stacks/pong output
+```
+
+### Step 2: Create a Prompt Stack
+Add a stack for your game in `stacks/pong/`. Start with an initial prompt:
+
+```markdown stacks/pong/001_create_pong.md
+# Pong Game Initial Setup
+
+Generate a simple Pong game with HTML, CSS, and JavaScript:
+- HTML: Basic structure with a canvas element.
+- CSS: Style the canvas with a black background and center it.
+- JS: Use Canvas API to draw a paddle, a ball, and basic movement (left/right paddle with arrow keys).
+
+## Output: output/current/index.html
+## Output: output/current/styles.css
+## Output: output/current/game.js
+```
+
+### Step 3: Configure vibec.json
+Create a `vibec.json` to target your new stack:
+```json vibec.json
+{
+  "stacks": ["pong"],
+  "output": "output"
+}
+```
+
+### Step 4: Compile the Project
+Run `vibec` to generate the game files:
+```bash
+export VIBEC_API_KEY=your_api_key_here
+npx vibec
+```
+
+This processes `stacks/pong/` and outputs files to `output/current/`.
+
+### Step 5: Test the Output
+Serve the game locally (e.g., using Python’s HTTP server):
+```bash
+cd output/current
+python3 -m http.server 8000
+```
+Open `http://localhost:8000` in your browser to play the basic Pong game.
+
+### Step 6: Enhance with More Prompts
+Add another prompt to improve the game:
+
+```markdown stacks/pong/002_add_score.md
+# Add Scoring to Pong
+
+Enhance the Pong game by adding:
+- A score display for the player.
+- Increment score when the ball passes the paddle (reset ball position).
+
+## Context: output/current/index.html, output/current/game.js
+## Output: output/current/game.js
+```
+
+Run `vibec` again:
+```bash
+npx vibec
+```
+
+### Step 7: Iterate and Debug
+Check `output/stages/` for each stage’s output and `output/current/` for the latest version. Use `VIBEC_DEBUG=1` to see detailed logs if something goes wrong:
+```bash
+export VIBEC_DEBUG=1
+npx vibec
+```
+
+That’s it! You’ve built and enhanced a Pong game using `vibec`’s prompt-driven workflow.
+
 ## Troubleshooting
 
 ### Common Issues
 
 - **API Key Not Found**: Set `VIBEC_API_KEY`.
-- **bootstrap.js fails**: Ensure `bin/vibec.js` exists.
-- **Permission denied**: Run `chmod +x bin/vibec.js`.
-- **No output**: Check prompt format with `## Output:`.
+- **No output**: Check prompt format with `## Output:` or ensure `vibec` is installed/accessible via `npx`.
+- **Command not found**: Install globally with `npm install -g vibec` or use `npx vibec`.
 
 ### Debug Mode
 
 ```bash
 export VIBEC_DEBUG=1
-node bootstrap.js
+npx vibec
 ```
 
 ## License
