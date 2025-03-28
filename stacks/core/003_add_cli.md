@@ -7,7 +7,6 @@ Enhance CLI parsing in `vibec.js` with additional options.
 - `--version`: Show `vibec vX.Y.Z` and exit.
 - `--retries=<number>`: Retry count, non-negative integer. Default: `0`.
 - `--plugin-timeout=<ms>`: JS plugin timeout in ms, positive integer. Default: `5000`.
-- `--workdir=<dir>`: Working directory (e.g., `custom_workdir`). Default: `.`.
 - `--output=<dir>`: Output directory (e.g., `custom_output`). Default: `output`.
 
 ### Implementation Notes

@@ -11,6 +11,7 @@ Generate a Node.js script with the following content:
 
 ## parseArgs
 - parse CLI args with the following options:
+  - `--workdir=<dir>`: Working directory (e.g., `custom_workdir`). Default: `.`.
   - `--stacks`: Comma-separated list of stacks to process (default: `['core']`)
   - `--dry-run`: Boolean flag to enable dry-run mode (default: `false`)
   - `--start`: Numeric value specifying the starting stage (default: `null`)
@@ -46,9 +47,6 @@ Generate a Node.js script with the following content:
 ## parseResponse
 - extract files with regex /File: (.+?)\n```(?:\w+)?\n([\s\S]+?)\n```/g
 
-## writeFiles
-- save to output/stages/<stage> and output/current/ using numeric stage
-
 ## runTests 
 - execute a testCmd if provided
 
@@ -61,7 +59,7 @@ Generate a Node.js script with the following content:
   - Process prompts using `processLlm` to generate responses.
   - Parse responses using `parseResponse` to extract file content.
   - Check for overwrites using `checkOverwrite` if `--no-overwrite` is set.
-  - Write files to `output/stages/<stage>` and `output/current/` using `writeFiles`.
+  - Write files to `output/stacks/<stack>/<prompt-file-name-without-md>/` and `output/current/` using `writeFiles`.
   - Run tests using `runTests` if a `--testCmd` is provided.
   - Exit with an error code if any step fails.
 - Wrap `main` in a `.catch` block to handle errors gracefully.
