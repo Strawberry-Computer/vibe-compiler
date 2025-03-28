@@ -5,6 +5,19 @@ const path = require('path');
 const https = require('https');
 const { execSync } = require('child_process');
 
+// Color logging utility
+const log = {
+  info: (message) => console.log(`\x1b[36m${message}\x1b[0m`),
+  warn: (message) => console.log(`\x1b[33m${message}\x1b[0m`),
+  error: (message) => console.log(`\x1b[31m${message}\x1b[0m`),
+  success: (message) => console.log(`\x1b[32m${message}\x1b[0m`),
+  debug: (message) => {
+    if (process.env.VIBEC_DEBUG) {
+      console.log(`\x1b[35m${message}\x1b[0m`);
+    }
+  }
+};
+
 /**
  * Parse command-line arguments
  * @param {string[]} argv - Command-line arguments
@@ -79,7 +92,7 @@ function parseArgs(argv) {
  * @returns {Promise<Array<{stack: string, file: string, number: number}>>} Sorted prompt files
  */
 async function getPromptFiles(stacks, workdir, start, end) {
-  console.log(`Scanning stacks: ${stacks.join(', ')}`);
+  log.info(`Scanning stacks: ${stacks.join(', ')}`);
   const promptFiles = [];
 
   for (const stack of stacks) {
@@ -102,7 +115,7 @@ async function getPromptFiles(stacks, workdir, start, end) {
         }
       }
     } catch (error) {
-      console.error(`Error scanning stack ${stack}: ${error.message}`);
+      log.error(`Error scanning stack ${stack}: ${error.message}`);
       throw error;
     }
   }
@@ -117,7 +130,7 @@ async function getPromptFiles(stacks, workdir, start, end) {
  * @returns {Promise<string>} Complete prompt with context
  */
 async function buildPrompt(filePath, workdir) {
-  console.log(`Building prompt from ${filePath}`);
+  log.info(`Building prompt from ${filePath}`);
   
   try {
     let promptContent = await fs.readFile(filePath, 'utf8');
@@ -136,7 +149,7 @@ async function buildPrompt(filePath, workdir) {
             `## Context: ${contextMatch[1]}\n\n\`\`\`\n${contextContent}\n\`\`\``
           );
         } catch (error) {
-          console.error(`Error reading context file ${contextPath}: ${error.message}`);
+          log.error(`Error reading context file ${contextPath}: ${error.message}`);
           throw error;
         }
       }
@@ -144,7 +157,7 @@ async function buildPrompt(filePath, workdir) {
     
     return promptContent;
   } catch (error) {
-    console.error(`Error building prompt from ${filePath}: ${error.message}`);
+    log.error(`Error building prompt from ${filePath}: ${error.message}`);
     throw error;
   }
 }
@@ -156,10 +169,10 @@ async function buildPrompt(filePath, workdir) {
  * @returns {Promise<string>} LLM response
  */
 async function processLlm(prompt, options) {
-  console.log('Processing prompt with LLM');
+  log.info('Processing prompt with LLM');
   
   if (options.dryRun) {
-    console.log('Dry run mode - would send prompt:');
+    log.warn('Dry run mode - would send prompt:');
     console.log(prompt);
     return 'File: example/file\n```lang\ncontent\n```';
   }
@@ -198,7 +211,7 @@ async function processLlm(prompt, options) {
     const data = await response.json();
     return data.choices[0].message.content;
   } catch (error) {
-    console.error(`Error calling LLM API: ${error.message}`);
+    log.error(`Error calling LLM API: ${error.message}`);
     throw error;
   }
 }
@@ -209,7 +222,7 @@ async function processLlm(prompt, options) {
  * @returns {Array<{path: string, content: string}>} Extracted files
  */
 function parseResponse(response) {
-  console.log('Parsing LLM response');
+  log.info('Parsing LLM response');
   
   const files = [];
   const fileRegex = /File: (.+?)\n```(?:\w+)?\n([\s\S]+?)\n```/g;
@@ -222,7 +235,7 @@ function parseResponse(response) {
     });
   }
   
-  console.log(`Extracted ${files.length} files from response`);
+  log.info(`Extracted ${files.length} files from response`);
   return files;
 }
 
@@ -233,13 +246,13 @@ function parseResponse(response) {
  * @returns {Promise<boolean>} True if no files would be overwritten
  */
 async function checkOverwrite(files, outputDir) {
-  console.log('Checking for file overwrites');
+  log.info('Checking for file overwrites');
   
   for (const file of files) {
     const filePath = path.join(outputDir, file.path);
     try {
       await fs.access(filePath);
-      console.error(`File would be overwritten: ${filePath}`);
+      log.error(`File would be overwritten: ${filePath}`);
       return false;
     } catch (error) {
       // File doesn't exist, which is what we want
@@ -257,7 +270,7 @@ async function checkOverwrite(files, outputDir) {
  * @returns {Promise<void>}
  */
 async function writeFiles(files, stackOutputDir, currentOutputDir) {
-  console.log(`Writing ${files.length} files`);
+  log.info(`Writing ${files.length} files`);
   
   for (const file of files) {
     const stackFilePath = path.join(stackOutputDir, file.path);
@@ -271,7 +284,7 @@ async function writeFiles(files, stackOutputDir, currentOutputDir) {
     await fs.writeFile(stackFilePath, file.content);
     await fs.writeFile(currentFilePath, file.content);
     
-    console.log(`Written: ${file.path}`);
+    log.success(`Written: ${file.path}`);
   }
 }
 
@@ -282,17 +295,17 @@ async function writeFiles(files, stackOutputDir, currentOutputDir) {
  */
 async function runTests(testCmd) {
   if (!testCmd) {
-    console.log('No test command provided, skipping tests');
+    log.info('No test command provided, skipping tests');
     return;
   }
   
-  console.log(`Running tests: ${testCmd}`);
+  log.info(`Running tests: ${testCmd}`);
   try {
     const output = execSync(testCmd, { encoding: 'utf8' });
-    console.log('Test output:');
+    log.info('Test output:');
     console.log(output);
   } catch (error) {
-    console.error(`Tests failed: ${error.message}`);
+    log.error(`Tests failed: ${error.message}`);
     throw error;
   }
 }
@@ -303,17 +316,17 @@ async function runTests(testCmd) {
  * @returns {Promise<void>}
  */
 async function main(argv) {
-  console.log('Starting processing');
+  log.info('Starting processing');
   
   const options = parseArgs(argv);
-  console.log('Options:', options);
+  log.debug('Options: ' + JSON.stringify(options));
   
   // Get prompt files
   const promptFiles = await getPromptFiles(options.stacks, options.workdir, options.start, options.end);
-  console.log(`Found ${promptFiles.length} prompt files to process`);
+  log.info(`Found ${promptFiles.length} prompt files to process`);
   
   for (const promptFile of promptFiles) {
-    console.log(`\nProcessing ${promptFile.file} (${promptFile.number})`);
+    log.info(`\nProcessing ${promptFile.file} (${promptFile.number})`);
     
     // Build prompt
     const prompt = await buildPrompt(promptFile.file, options.workdir);
@@ -325,7 +338,7 @@ async function main(argv) {
     const files = parseResponse(response);
     
     if (files.length === 0) {
-      console.warn('Warning: No files extracted from LLM response');
+      log.warn('Warning: No files extracted from LLM response');
       continue;
     }
     
@@ -349,18 +362,19 @@ async function main(argv) {
   // Run tests
   await runTests(options.testCmd);
   
-  console.log('Processing completed successfully');
+  log.success('Processing completed successfully');
 }
 
 // Run main function if script is executed directly
 if (require.main === module) {
   main(process.argv).catch(error => {
-    console.error(`Error: ${error.message}`);
+    log.error(`Error: ${error.message}`);
     process.exit(1);
   });
 }
 
 module.exports = {
+  log,
   parseArgs,
   getPromptFiles,
   buildPrompt,
