@@ -12,6 +12,7 @@ Add `vibec.json` loading to vibec.js, merging with existing CLI and env vars (pr
 - `noOverwrite`: Boolean, no overwrites. Default: `false`.
 - `dryRun`: Boolean, simulate only. Default: `false`.
 - `apiUrl`: String, LLM API URL. Default: inherited from vibec.js.
+- `apiKey`: String, LLM API key. Default: inherited from vibec.js. Not recommended for config vs env var.
 - `apiModel`: String, LLM model. Default: inherited from vibec.js.
 - `testCmd`: String, test command. Default: `null`.
 - `retries`: Integer, retry count. Default: `0`.
@@ -22,6 +23,7 @@ Add `vibec.json` loading to vibec.js, merging with existing CLI and env vars (pr
 - `VIBEC_NO_OVERWRITE`: `true`/`false`.
 - `VIBEC_DRY_RUN`: `true`/`false`.
 - `VIBEC_API_URL`: URL string.
+- `VIBEC_API_KEY`: API key string.
 - `VIBEC_API_MODEL`: Model string.
 - `VIBEC_TEST_CMD`: Command string.
 - `VIBEC_RETRIES`: Integer string (e.g., `2`).

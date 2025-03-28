@@ -1,9 +1,6 @@
 # Test Configuration Support
 
 Add tests for config loading in `bin/vibec.js`:
-- Update `test.sh` to run:
-  - `node bin/vibec.js --dry-run --stacks=core`
-- Use `tape` in `test.js` to test:
   - Config Loading (Dry-Run):
     - Mock `fs.readFile` with valid `vibec.json` (`{ "stacks": ["core"], "retries": 2 }`), verify merged options.
     - Mock `fs.readFile` with malformed JSON, verify empty config and `log.error` call.

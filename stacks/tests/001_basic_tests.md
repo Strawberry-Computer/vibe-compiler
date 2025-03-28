@@ -9,7 +9,7 @@ Generate and enhance a test script for vibec:
     - In --dry-run mode, expect it to print the prompt and return 'File: example/file\n```lang\ncontent\n```'.  Don't forget to escape backticks properly.
   - Run `node output/current/test.js` to execute TAP tests.
 
-- Add `test.js` to validate logging and real mode:
+- Create `test.js` to validate logging and real mode:
   - Use `tape` to test:
     - Logging: `log.info`, `log.warn`, `log.error`, `log.success` output ANSI colors; `log.debug` outputs if `VIBEC_DEBUG=1`.
     - Real Mode
@@ -18,7 +18,7 @@ Generate and enhance a test script for vibec:
       - check `output/current/test-file.js` exists.
     - Cleanup in `finally` block (close server, remove `output/current/test.js` if created by this test).
   - Use only Node builtins (`http`, `tape`), import `./bin/vibec.js`.
-  - Use async/await in `tape` tests.
+  - Use async/await in `tape` tests. Don't use t.end(). 
 - Exit with 0 on success, 1 on failure.
 
 ## Context: bin/vibec.js, test.sh
