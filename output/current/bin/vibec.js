@@ -43,9 +43,18 @@ async function loadConfig(workdir) {
   const configPath = path.join(workdir, 'vibec.json');
   try {
     const configData = await fs.readFile(configPath, 'utf8');
-    return JSON.parse(configData);
+    try {
+      return JSON.parse(configData);
+    } catch (parseError) {
+      log.error(`Error parsing vibec.json: ${parseError.message}`);
+      throw new Error(`Malformed JSON in config file: ${parseError.message}`);
+    }
   } catch (error) {
-    log.debug(`No config file found at ${configPath} or error reading it: ${error.message}`);
+    if (error.code !== 'ENOENT') {
+      log.warn(`Error reading config file: ${error.message}`);
+    } else {
+      log.debug(`No config file found at ${configPath}`);
+    }
     return {};
   }
 }
@@ -168,14 +177,14 @@ Options:
 }
 
 /**
- * Merge config with environment variables and CLI options
- * @param {Object} cliOptions - Command line options
- * @param {Object} configOptions - Config file options
+ * Merge options from different sources
+ * @param {Object} cliOptions - Options from command line arguments
+ * @param {Object} configOptions - Options from config file
  * @returns {Object} Merged options
  */
-function mergeConfig(cliOptions, configOptions) {
-  // Start with the default values
-  const merged = {
+function mergeOptions(cliOptions, configOptions = {}) {
+  // Deep clone the default options
+  const defaults = {
     workdir: '.',
     stacks: ['core'],
     dryRun: false,
@@ -191,96 +200,54 @@ function mergeConfig(cliOptions, configOptions) {
     output: 'output'
   };
 
-  // Apply config file options
-  if (configOptions) {
-    if (configOptions.stacks) merged.stacks = configOptions.stacks;
-    if (configOptions.noOverwrite !== undefined) merged.noOverwrite = !!configOptions.noOverwrite;
-    if (configOptions.dryRun !== undefined) merged.dryRun = !!configOptions.dryRun;
-    if (configOptions.apiUrl) merged.apiUrl = configOptions.apiUrl;
-    if (configOptions.apiKey) merged.apiKey = configOptions.apiKey;
-    if (configOptions.apiModel) merged.apiModel = configOptions.apiModel;
-    if (configOptions.testCmd !== undefined) merged.testCmd = configOptions.testCmd;
-    if (configOptions.retries !== undefined) {
-      merged.retries = parseInt(configOptions.retries, 10);
-      if (isNaN(merged.retries) || merged.retries < 0) {
-        log.warn('Invalid retries value in config, must be >= 0');
-        merged.retries = 0;
-      }
+  // Process environment variables
+  const envOptions = {
+    workdir: process.env.VIBEC_WORKDIR,
+    stacks: process.env.VIBEC_STACKS ? process.env.VIBEC_STACKS.split(',') : undefined,
+    dryRun: process.env.VIBEC_DRY_RUN ? process.env.VIBEC_DRY_RUN.toLowerCase() === 'true' : undefined,
+    noOverwrite: process.env.VIBEC_NO_OVERWRITE ? process.env.VIBEC_NO_OVERWRITE.toLowerCase() === 'true' : undefined,
+    start: process.env.VIBEC_START ? parseInt(process.env.VIBEC_START, 10) : undefined,
+    end: process.env.VIBEC_END ? parseInt(process.env.VIBEC_END, 10) : undefined,
+    apiUrl: process.env.VIBEC_API_URL,
+    apiKey: process.env.VIBEC_API_KEY,
+    apiModel: process.env.VIBEC_API_MODEL,
+    testCmd: process.env.VIBEC_TEST_CMD,
+    retries: process.env.VIBEC_RETRIES ? parseInt(process.env.VIBEC_RETRIES, 10) : undefined,
+    pluginTimeout: process.env.VIBEC_PLUGIN_TIMEOUT ? parseInt(process.env.VIBEC_PLUGIN_TIMEOUT, 10) : undefined
+  };
+
+  // Remove undefined values
+  Object.keys(envOptions).forEach(key => {
+    if (envOptions[key] === undefined) {
+      delete envOptions[key];
     }
-    if (configOptions.pluginTimeout !== undefined) {
-      merged.pluginTimeout = parseInt(configOptions.pluginTimeout, 10);
-      if (isNaN(merged.pluginTimeout) || merged.pluginTimeout <= 0) {
-        log.warn('Invalid pluginTimeout value in config, must be > 0');
-        merged.pluginTimeout = 5000;
-      }
-    }
-    if (configOptions.output) merged.output = configOptions.output;
+  });
+
+  // Convert string to array for stacks in config if needed
+  if (configOptions.stacks && typeof configOptions.stacks === 'string') {
+    configOptions.stacks = configOptions.stacks.split(',');
   }
 
-  // Apply environment variables
-  if (process.env.VIBEC_STACKS) {
-    merged.stacks = process.env.VIBEC_STACKS.split(',').map(s => s.trim());
+  // Merge with priority: CLI > Environment > Config > Defaults
+  const mergedOptions = {
+    ...defaults,
+    ...configOptions,
+    ...envOptions,
+    ...cliOptions
+  };
+
+  // Validate options
+  if (mergedOptions.retries < 0) {
+    log.error("Invalid value for retries: must be >= 0");
+    mergedOptions.retries = 0;
   }
-  if (process.env.VIBEC_NO_OVERWRITE) {
-    merged.noOverwrite = process.env.VIBEC_NO_OVERWRITE.toLowerCase() === 'true';
-  }
-  if (process.env.VIBEC_DRY_RUN) {
-    merged.dryRun = process.env.VIBEC_DRY_RUN.toLowerCase() === 'true';
-  }
-  if (process.env.VIBEC_API_URL) {
-    merged.apiUrl = process.env.VIBEC_API_URL;
-  }
-  if (process.env.VIBEC_API_KEY) {
-    merged.apiKey = process.env.VIBEC_API_KEY;
-  }
-  if (process.env.VIBEC_API_MODEL) {
-    merged.apiModel = process.env.VIBEC_API_MODEL;
-  }
-  if (process.env.VIBEC_TEST_CMD) {
-    merged.testCmd = process.env.VIBEC_TEST_CMD;
-  }
-  if (process.env.VIBEC_RETRIES) {
-    merged.retries = parseInt(process.env.VIBEC_RETRIES, 10);
-    if (isNaN(merged.retries) || merged.retries < 0) {
-      log.warn('Invalid VIBEC_RETRIES value, must be >= 0');
-      merged.retries = 0;
-    }
-  }
-  if (process.env.VIBEC_PLUGIN_TIMEOUT) {
-    merged.pluginTimeout = parseInt(process.env.VIBEC_PLUGIN_TIMEOUT, 10);
-    if (isNaN(merged.pluginTimeout) || merged.pluginTimeout <= 0) {
-      log.warn('Invalid VIBEC_PLUGIN_TIMEOUT value, must be > 0');
-      merged.pluginTimeout = 5000;
-    }
+  
+  if (mergedOptions.pluginTimeout <= 0) {
+    log.error("Invalid value for pluginTimeout: must be > 0");
+    mergedOptions.pluginTimeout = 5000;
   }
 
-  // Apply CLI options (highest priority)
-  // Only apply non-default CLI options to preserve lower priority values when CLI option wasn't explicitly set
-  if (cliOptions.workdir !== '.') merged.workdir = cliOptions.workdir;
-  if (cliOptions.stacks.length && JSON.stringify(cliOptions.stacks) !== '["core"]') merged.stacks = cliOptions.stacks;
-  if (cliOptions.dryRun) merged.dryRun = cliOptions.dryRun;
-  if (cliOptions.start !== null) merged.start = cliOptions.start;
-  if (cliOptions.end !== null) merged.end = cliOptions.end;
-  if (cliOptions.noOverwrite) merged.noOverwrite = cliOptions.noOverwrite;
-  if (cliOptions.apiUrl !== 'https://openrouter.ai/api/v1') merged.apiUrl = cliOptions.apiUrl;
-  if (cliOptions.apiKey !== null) merged.apiKey = cliOptions.apiKey;
-  if (cliOptions.apiModel !== 'anthropic/claude-3.7-sonnet') merged.apiModel = cliOptions.apiModel;
-  if (cliOptions.testCmd !== null) merged.testCmd = cliOptions.testCmd;
-  if (cliOptions.pluginTimeout !== 5000) merged.pluginTimeout = cliOptions.pluginTimeout;
-  if (cliOptions.retries !== 0) merged.retries = cliOptions.retries;
-  if (cliOptions.output !== 'output') merged.output = cliOptions.output;
-
-  // Validate merged config
-  if (merged.retries < 0) {
-    log.error('Invalid retries value, must be >= 0');
-    merged.retries = 0;
-  }
-  if (merged.pluginTimeout <= 0) {
-    log.error('Invalid pluginTimeout value, must be > 0');
-    merged.pluginTimeout = 5000;
-  }
-
-  return merged;
+  return mergedOptions;
 }
 
 /**
@@ -727,13 +694,14 @@ async function reconstructCurrent(startNumber, promptFiles, workdir, outputDir) 
  */
 async function main(argv) {
   try {
+    // Parse CLI arguments
     const cliOptions = parseArgs(argv);
     
-    // Load config file if it exists
+    // Load config file if available
     const configOptions = await loadConfig(cliOptions.workdir);
     
-    // Merge config with env vars and CLI options
-    const options = mergeConfig(cliOptions, configOptions);
+    // Merge options from all sources (CLI > env > config > defaults)
+    const options = mergeOptions(cliOptions, configOptions);
     
     log.info('Running with options:', options);
 
@@ -816,6 +784,7 @@ if (require.main === module) {
 module.exports = {
   log,
   parseArgs,
+  mergeOptions,
   getPromptFiles,
   buildPrompt,
   processLlm,
@@ -828,6 +797,5 @@ module.exports = {
   loadDynamicPlugins,
   executeDynamicPlugins,
   loadConfig,
-  mergeConfig,
   main
 };
