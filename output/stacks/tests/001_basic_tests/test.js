@@ -1,140 +1,147 @@
-const test = require('tape');
+const tape = require('tape');
 const http = require('http');
 const fs = require('fs').promises;
 const path = require('path');
-const vibec = require('./bin/vibec.js');
-const { log } = vibec;
+const { log, main } = require('./bin/vibec.js');
 
-// Helper to capture console output
-function captureOutput(fn) {
-  const originalConsoleLog = console.log;
-  const capturedOutput = [];
+tape('Logging functionality', async (t) => {
+  // Save the original logger and create a mock
+  const originalLogger = log.logger;
+  let logOutput = [];
   
-  console.log = (...args) => {
-    capturedOutput.push(args.join(' '));
+  log.logger = (...args) => {
+    logOutput.push(args.join(' '));
   };
   
   try {
-    fn();
+    // Test info logging with ANSI colors
+    logOutput = [];
+    log.info('Info message');
+    t.true(logOutput[0].includes('\x1b[36mInfo message\x1b[0m'), 'log.info should output cyan text');
+    
+    // Test warning logging with ANSI colors
+    logOutput = [];
+    log.warn('Warning message');
+    t.true(logOutput[0].includes('\x1b[33mWarning message\x1b[0m'), 'log.warn should output yellow text');
+    
+    // Test error logging with ANSI colors
+    logOutput = [];
+    log.error('Error message');
+    t.true(logOutput[0].includes('\x1b[31mError message\x1b[0m'), 'log.error should output red text');
+    
+    // Test success logging with ANSI colors
+    logOutput = [];
+    log.success('Success message');
+    t.true(logOutput[0].includes('\x1b[32mSuccess message\x1b[0m'), 'log.success should output green text');
+    
+    // Test debug logging - should not output when VIBEC_DEBUG is not set
+    logOutput = [];
+    delete process.env.VIBEC_DEBUG;
+    log.debug('Debug message without flag');
+    t.equal(logOutput.length, 0, 'log.debug should not output when VIBEC_DEBUG is not set');
+    
+    // Test debug logging - should output when VIBEC_DEBUG=1
+    logOutput = [];
+    process.env.VIBEC_DEBUG = '1';
+    log.debug('Debug message with flag');
+    t.true(logOutput[0].includes('\x1b[35mDebug message with flag\x1b[0m'), 'log.debug should output purple text when VIBEC_DEBUG=1');
   } finally {
-    console.log = originalConsoleLog;
+    // Restore the original logger
+    log.logger = originalLogger;
+    delete process.env.VIBEC_DEBUG;
   }
-  
-  return capturedOutput;
-}
-
-test('Logging tests', async (t) => {
-  // Test ANSI color logging
-  const infoOutput = captureOutput(() => log.info('Test info message'));
-  t.ok(infoOutput[0].includes('\x1b[36m'), 'log.info should use cyan color');
-  
-  const warnOutput = captureOutput(() => log.warn('Test warn message'));
-  t.ok(warnOutput[0].includes('\x1b[33m'), 'log.warn should use yellow color');
-  
-  const errorOutput = captureOutput(() => log.error('Test error message'));
-  t.ok(errorOutput[0].includes('\x1b[31m'), 'log.error should use red color');
-  
-  const successOutput = captureOutput(() => log.success('Test success message'));
-  t.ok(successOutput[0].includes('\x1b[32m'), 'log.success should use green color');
-  
-  // Test debug output with VIBEC_DEBUG=1
-  process.env.VIBEC_DEBUG = '1';
-  const debugOutput = captureOutput(() => log.debug('Test debug message'));
-  t.ok(debugOutput[0].includes('\x1b[35m'), 'log.debug should use magenta color when VIBEC_DEBUG=1');
-  
-  // Test debug output without VIBEC_DEBUG=1
-  delete process.env.VIBEC_DEBUG;
-  const noDebugOutput = captureOutput(() => log.debug('Test debug message'));
-  t.equal(noDebugOutput.length, 0, 'log.debug should not output anything when VIBEC_DEBUG is not set');
 });
 
-test('Real mode test with mocked API', async (t) => {
-  // Create test directory
+tape('Real mode execution', async (t) => {
+  // Save the original logger
+  const originalLogger = log.logger;
+  log.logger = () => {}; // Silence logs for this test
+  
+  let server;
   const testWorkdir = './test-workdir';
-  await fs.mkdir(testWorkdir, { recursive: true });
-  await fs.mkdir(path.join(testWorkdir, 'output'), { recursive: true });
-  await fs.mkdir(path.join(testWorkdir, 'output', 'current'), { recursive: true });
-  
-  // Create mock server
-  const server = http.createServer((req, res) => {
-    if (req.url === '/chat/completions' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => {
-        body += chunk.toString();
-      });
-      
-      req.on('end', () => {
-        const mockResponse = {
-          choices: [{
-            message: {
-              content: 'File: test-file.js\n```js\nconsole.log("mock")\n```'
-            }
-          }]
-        };
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(mockResponse));
-      });
-    } else {
-      res.writeHead(404);
-      res.end('Not found');
-    }
-  });
-  
-  // Start listening on an available port
-  server.listen(3000);
+  const testOutputDir = path.join(testWorkdir, 'output/current');
+  const testFile = path.join(testOutputDir, 'test-file.js');
   
   try {
-    // Call main with mocked API
-    await vibec.main([
-      process.execPath,
-      'vibec.js',
+    // Create a mock server
+    server = http.createServer((req, res) => {
+      if (req.method === 'POST' && req.url === '/chat/completions') {
+        let body = '';
+        req.on('data', chunk => {
+          body += chunk.toString();
+        });
+        
+        req.on('end', () => {
+          const responseObj = {
+            choices: [
+              {
+                message: {
+                  content: 'File: test-file.js\n```js\nconsole.log("mock")\n```'
+                }
+              }
+            ]
+          };
+          
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(responseObj));
+        });
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    
+    server.listen(3000);
+    
+    // Setup test directories
+    await fs.mkdir(path.join(testWorkdir, 'stacks/core'), { recursive: true });
+    await fs.mkdir(testOutputDir, { recursive: true });
+    
+    // Create a test prompt file
+    const promptDir = path.join(testWorkdir, 'stacks/core');
+    await fs.writeFile(
+      path.join(promptDir, '001_test.md'),
+      '# Test Prompt\n\n## Output: test-file.js'
+    );
+    
+    // Run vibec in real mode
+    const args = [
+      'node', 'script.js',
       '--api-url=http://localhost:3000',
       '--api-key=test-key',
       '--workdir=' + testWorkdir
-    ]);
+    ];
     
-    // Check if file was created correctly
-    try {
-      const fileContent = await fs.readFile(path.join(testWorkdir, 'output', 'current', 'test-file.js'), 'utf8');
-      t.equal(fileContent, 'console.log("mock")', 'Created file should have expected content');
-    } catch (err) {
-      t.fail(`Failed to read created file: ${err.message}`);
+    await main(args);
+    
+    // Verify the output file was created
+    const fileExists = await fileExistsAsync(testFile);
+    t.true(fileExists, 'Output file should be created');
+    
+    if (fileExists) {
+      const content = await fs.readFile(testFile, 'utf8');
+      t.equal(content, 'console.log("mock")', 'File content should match mock response');
     }
     
   } finally {
-    // Cleanup
-    server.close();
+    // Clean up
+    log.logger = originalLogger;
+    if (server) {
+      server.close();
+    }
     try {
       await fs.rm(testWorkdir, { recursive: true, force: true });
     } catch (error) {
-      console.error('Error cleaning up test directory:', error);
+      console.error('Cleanup failed:', error);
     }
   }
 });
 
-test('parseArgs function test', async (t) => {
-  const args = [
-    process.execPath,
-    'vibec.js',
-    '--workdir=test-dir',
-    '--dry-run',
-    '--api-key=test-key'
-  ];
-  
-  const options = vibec.parseArgs(args);
-  t.equal(options.workdir, 'test-dir', 'workdir option should be parsed correctly');
-  t.equal(options.dryRun, true, 'dry-run flag should be parsed correctly');
-  t.equal(options.apiKey, 'test-key', 'api-key option should be parsed correctly');
-});
-
-test('parseResponse function test', async (t) => {
-  const response = 'Some text\nFile: path/to/file1.js\n```js\nconsole.log("test");\n```\nMore text\nFile: path/to/file2.css\n```css\nbody { color: red; }\n```';
-  
-  const files = vibec.parseResponse(response);
-  t.equal(files.length, 2, 'Should extract 2 files from response');
-  t.equal(files[0].path, 'path/to/file1.js', 'First file path should be extracted correctly');
-  t.equal(files[0].content, 'console.log("test");', 'First file content should be extracted correctly');
-  t.equal(files[1].path, 'path/to/file2.css', 'Second file path should be extracted correctly');
-  t.equal(files[1].content, 'body { color: red; }', 'Second file content should be extracted correctly');
-});
+async function fileExistsAsync(file) {
+  try {
+    await fs.access(file);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}

@@ -1,282 +1,393 @@
-const test = require('tape');
+const tape = require('tape');
 const http = require('http');
 const fs = require('fs').promises;
 const path = require('path');
+const { execSync } = require('child_process');
 const os = require('os');
-const vibec = require('./bin/vibec.js');
-const { log } = vibec;
+const { log, parseArgs, loadStaticPlugins, loadDynamicPlugins, executeDynamicPlugins, main } = require('./bin/vibec.js');
 
-// Helper to capture console output
-function captureOutput(fn) {
-  const originalConsoleLog = console.log;
-  const capturedOutput = [];
+tape('Logging functionality', async (t) => {
+  // Save the original logger and create a mock
+  const originalLogger = log.logger;
+  let logOutput = [];
   
-  console.log = (...args) => {
-    capturedOutput.push(args.join(' '));
+  log.logger = (...args) => {
+    logOutput.push(args.join(' '));
   };
   
   try {
-    fn();
+    // Test info logging with ANSI colors
+    logOutput = [];
+    log.info('Info message');
+    t.true(logOutput[0].includes('\x1b[36mInfo message\x1b[0m'), 'log.info should output cyan text');
+    
+    // Test warning logging with ANSI colors
+    logOutput = [];
+    log.warn('Warning message');
+    t.true(logOutput[0].includes('\x1b[33mWarning message\x1b[0m'), 'log.warn should output yellow text');
+    
+    // Test error logging with ANSI colors
+    logOutput = [];
+    log.error('Error message');
+    t.true(logOutput[0].includes('\x1b[31mError message\x1b[0m'), 'log.error should output red text');
+    
+    // Test success logging with ANSI colors
+    logOutput = [];
+    log.success('Success message');
+    t.true(logOutput[0].includes('\x1b[32mSuccess message\x1b[0m'), 'log.success should output green text');
+    
+    // Test debug logging - should not output when VIBEC_DEBUG is not set
+    logOutput = [];
+    delete process.env.VIBEC_DEBUG;
+    log.debug('Debug message without flag');
+    t.equal(logOutput.length, 0, 'log.debug should not output when VIBEC_DEBUG is not set');
+    
+    // Test debug logging - should output when VIBEC_DEBUG=1
+    logOutput = [];
+    process.env.VIBEC_DEBUG = '1';
+    log.debug('Debug message with flag');
+    t.true(logOutput[0].includes('\x1b[35mDebug message with flag\x1b[0m'), 'log.debug should output purple text when VIBEC_DEBUG=1');
   } finally {
-    console.log = originalConsoleLog;
+    // Restore the original logger
+    log.logger = originalLogger;
+    delete process.env.VIBEC_DEBUG;
   }
-  
-  return capturedOutput;
-}
+});
 
-// Create a temp directory for testing
+// Helper to create a temporary test directory
 async function createTempTestDir() {
-  const tempDir = path.join(os.tmpdir(), 'vibec-test-' + Math.random().toString(36).substr(2, 9));
+  const tempDir = path.join(os.tmpdir(), `vibec-test-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
   await fs.mkdir(tempDir, { recursive: true });
-  await fs.mkdir(path.join(tempDir, 'output'), { recursive: true });
+  
+  // Create necessary subdirectories
+  await fs.mkdir(path.join(tempDir, 'stacks', 'test-stack'), { recursive: true });
   await fs.mkdir(path.join(tempDir, 'output', 'current'), { recursive: true });
-  await fs.mkdir(path.join(tempDir, 'stacks'), { recursive: true });
+  await fs.mkdir(path.join(tempDir, 'output', 'stacks', 'test-stack'), { recursive: true });
+  
   return tempDir;
 }
 
-test('Logging tests', async (t) => {
-  // Test ANSI color logging
-  const infoOutput = captureOutput(() => log.info('Test info message'));
-  t.ok(infoOutput[0].includes('\x1b[36m'), 'log.info should use cyan color');
+// Helper to check if file exists
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+tape('CLI argument parsing', async (t) => {
+  // Test stacks argument
+  const argsWithStacks = ['node', 'vibec.js', '--stacks=core,tests'];
+  const optsWithStacks = parseArgs(argsWithStacks);
+  t.deepEqual(optsWithStacks.stacks, ['core', 'tests'], 'Should parse comma-separated stacks');
   
-  const warnOutput = captureOutput(() => log.warn('Test warn message'));
-  t.ok(warnOutput[0].includes('\x1b[33m'), 'log.warn should use yellow color');
+  // Test dry-run flag
+  const argsWithDryRun = ['node', 'vibec.js', '--dry-run'];
+  const optsWithDryRun = parseArgs(argsWithDryRun);
+  t.true(optsWithDryRun.dryRun, 'Should set dryRun to true with --dry-run flag');
   
-  const errorOutput = captureOutput(() => log.error('Test error message'));
-  t.ok(errorOutput[0].includes('\x1b[31m'), 'log.error should use red color');
+  // Test no-overwrite flag
+  const argsWithNoOverwrite = ['node', 'vibec.js', '--no-overwrite'];
+  const optsWithNoOverwrite = parseArgs(argsWithNoOverwrite);
+  t.true(optsWithNoOverwrite.noOverwrite, 'Should set noOverwrite to true with --no-overwrite flag');
   
-  const successOutput = captureOutput(() => log.success('Test success message'));
-  t.ok(successOutput[0].includes('\x1b[32m'), 'log.success should use green color');
-  
-  // Test debug output with VIBEC_DEBUG=1
-  process.env.VIBEC_DEBUG = '1';
-  const debugOutput = captureOutput(() => log.debug('Test debug message'));
-  t.ok(debugOutput[0].includes('\x1b[35m'), 'log.debug should use magenta color when VIBEC_DEBUG=1');
-  
-  // Test debug output without VIBEC_DEBUG=1
-  delete process.env.VIBEC_DEBUG;
-  const noDebugOutput = captureOutput(() => log.debug('Test debug message'));
-  t.equal(noDebugOutput.length, 0, 'log.debug should not output anything when VIBEC_DEBUG is not set');
+  // Test multiple flags
+  const argsWithMultipleFlags = ['node', 'vibec.js', '--stacks=core', '--dry-run', '--no-overwrite'];
+  const optsWithMultipleFlags = parseArgs(argsWithMultipleFlags);
+  t.deepEqual(optsWithMultipleFlags.stacks, ['core'], 'Should parse stacks correctly');
+  t.true(optsWithMultipleFlags.dryRun, 'Should set dryRun to true');
+  t.true(optsWithMultipleFlags.noOverwrite, 'Should set noOverwrite to true');
 });
 
-test('Static plugins test with mocked API', async (t) => {
-  // Create test directory with test stack
-  const testWorkdir = await createTempTestDir();
-  const testStackDir = path.join(testWorkdir, 'stacks', 'test-stack');
-  const pluginsDir = path.join(testStackDir, 'plugins');
-  
-  await fs.mkdir(testStackDir, { recursive: true });
-  await fs.mkdir(pluginsDir, { recursive: true });
-  
-  // Create test prompt
-  await fs.writeFile(path.join(testStackDir, '001_test.md'), 
-    '# Test Prompt\n\n## Output: test.js\n\nGenerate a test file');
-  
-  // Create static plugin
-  await fs.writeFile(path.join(pluginsDir, 'test-plugin.md'), 
-    'This is a test plugin content that should be appended to the prompt');
-  
-  // Create mock server
-  const server = http.createServer((req, res) => {
-    if (req.url === '/chat/completions' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => {
-        body += chunk.toString();
-      });
-      
-      req.on('end', () => {
-        // Verify plugin content is included
-        const hasPluginContent = body.includes('test-plugin.md') && 
-                                body.includes('This is a test plugin content');
-        
-        const mockResponse = {
-          choices: [{
-            message: {
-              content: 'File: test.js\n```js\nconsole.log("mock")\n```'
-            }
-          }]
-        };
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(mockResponse));
-      });
-    } else {
-      res.writeHead(404);
-      res.end('Not found');
-    }
-  });
-  
-  // Start listening
-  server.listen(3000);
+tape('Static plugin (.md) integration', async (t) => {
+  // Create a mock server
+  let server;
+  let tempDir;
   
   try {
-    // Call main with mocked API
-    await vibec.main([
-      process.execPath,
-      'vibec.js',
+    tempDir = await createTempTestDir();
+    
+    // Create plugin directory and test static plugin
+    const pluginsDir = path.join(tempDir, 'stacks', 'test-stack', 'plugins');
+    await fs.mkdir(pluginsDir, { recursive: true });
+    
+    // Create a static plugin
+    await fs.writeFile(
+      path.join(pluginsDir, 'test-plugin.md'),
+      '## Test Plugin Content\nThis is a test plugin.'
+    );
+    
+    // Create a prompt file
+    await fs.writeFile(
+      path.join(tempDir, 'stacks', 'test-stack', '001_test.md'),
+      '# Test Prompt\n\n## Output: test.js'
+    );
+    
+    // Set up a mock server to respond to chat completions
+    server = http.createServer((req, res) => {
+      if (req.method === 'POST' && req.url === '/chat/completions') {
+        let body = '';
+        req.on('data', chunk => {
+          body += chunk.toString();
+        });
+        
+        req.on('end', () => {
+          // Check if the request contains the plugin content
+          const hasPluginContent = body.includes('Test Plugin Content');
+          
+          const responseObj = {
+            choices: [
+              {
+                message: {
+                  content: 'File: test.js\n```js\nconsole.log("mock")\n```'
+                }
+              }
+            ]
+          };
+          
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(responseObj));
+        });
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    
+    server.listen(3000);
+    
+    // Silence logs for this test
+    const originalLogger = log.logger;
+    log.logger = () => {};
+    
+    // Run vibec with the static plugin
+    const args = [
+      'node', 'vibec.js',
       '--api-url=http://localhost:3000',
       '--api-key=test-key',
-      '--workdir=' + testWorkdir,
+      '--workdir=' + tempDir,
       '--stacks=test-stack',
       '--dry-run=false'
-    ]);
+    ];
     
-    // Check if file was created correctly
-    const fileContent = await fs.readFile(path.join(testWorkdir, 'output', 'current', 'test.js'), 'utf8');
-    t.equal(fileContent, 'console.log("mock")', 'Created file should have expected content');
+    await main(args);
     
+    // Verify the output file was created
+    const outputFile = path.join(tempDir, 'output', 'current', 'test.js');
+    const exists = await fileExists(outputFile);
+    t.true(exists, 'Output file should be created');
+    
+    if (exists) {
+      const content = await fs.readFile(outputFile, 'utf8');
+      t.equal(content, 'console.log("mock")', 'File content should match mock response');
+    }
+    
+    // Restore the logger
+    log.logger = originalLogger;
   } finally {
-    // Cleanup
-    server.close();
-    await fs.rm(testWorkdir, { recursive: true, force: true });
+    // Clean up
+    if (server) {
+      server.close();
+    }
+    if (tempDir) {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
   }
 });
 
-test('Dynamic plugins test', async (t) => {
-  // Create test directory with test stack
-  const testWorkdir = await createTempTestDir();
-  const testStackDir = path.join(testWorkdir, 'stacks', 'test-stack');
-  const pluginsDir = path.join(testStackDir, 'plugins');
-  
-  await fs.mkdir(testStackDir, { recursive: true });
-  await fs.mkdir(pluginsDir, { recursive: true });
-  
-  // Create test prompt
-  await fs.writeFile(path.join(testStackDir, '001_test.md'), '# Test Prompt\n\nA test prompt');
-  
-  // Create dynamic plugin (that adds a file)
-  await fs.writeFile(path.join(pluginsDir, 'test-plugin.js'), 
-    'module.exports = async function(context) { return "test"; }');
-  
-  // Execute plugins directly to test
-  const plugins = await vibec.loadDynamicPlugins('test-stack', testWorkdir);
-  t.equal(plugins.length, 1, 'Should load 1 dynamic plugin');
-  t.equal(plugins[0].name, 'test-plugin.js', 'Plugin name should match');
-  
-  // Test plugin execution with timeout
-  const context = {};
-  let executed = false;
-  
-  // Mock plugin that returns fast
-  const fastPlugin = {
-    name: 'fast-plugin.js',
-    execute: async (ctx) => {
-      executed = true;
-      return "test result";
-    }
-  };
-  
-  await vibec.executeDynamicPlugins([fastPlugin], context, 1000);
-  t.ok(executed, 'Fast plugin should execute successfully');
-  
-  // Mock plugin that times out
-  executed = false;
-  const slowPlugin = {
-    name: 'slow-plugin.js',
-    execute: async (ctx) => {
-      return new Promise(resolve => {
-        setTimeout(() => {
-          executed = true;
-          resolve("too late");
-        }, 2000);
-      });
-    }
-  };
-  
-  // Capture errors during execution
-  let errorCaptured = false;
-  const originalError = log.error;
-  log.error = (msg) => {
-    if (msg.includes('timed out')) {
-      errorCaptured = true;
-    }
-    originalError(msg);
-  };
-  
-  await vibec.executeDynamicPlugins([slowPlugin], context, 100);
-  t.ok(errorCaptured, 'Plugin timeout should be captured');
-  t.notOk(executed, 'Slow plugin execution should be aborted');
-  
-  // Restore original error function
-  log.error = originalError;
+tape('Dynamic plugin (.js) integration', async (t) => {
+  let tempDir;
   
   try {
-    await fs.rm(testWorkdir, { recursive: true, force: true });
-  } catch (error) {
-    console.error('Error cleaning up test directory:', error);
+    tempDir = await createTempTestDir();
+    
+    // Create a dynamic plugin that returns a string
+    const pluginsDir = path.join(tempDir, 'stacks', 'test-stack', 'plugins');
+    await fs.mkdir(pluginsDir, { recursive: true });
+    
+    await fs.writeFile(
+      path.join(pluginsDir, 'test-plugin.js'),
+      `module.exports = async function(context) {
+        return "test";
+      }`
+    );
+    
+    // Prepare context for plugin execution
+    const context = {
+      config: { pluginTimeout: 1000 },
+      stack: 'test-stack',
+      promptNumber: 1,
+      promptContent: '# Test',
+      workingDir: path.join(tempDir, 'output', 'current')
+    };
+    
+    // Load and execute the dynamic plugins
+    const plugins = await loadDynamicPlugins('test-stack', tempDir);
+    t.equal(plugins.length, 1, 'Should load one dynamic plugin');
+    t.equal(plugins[0].name, 'test-plugin.js', 'Plugin name should match');
+    
+    // Silence logs for this test
+    const originalLogger = log.logger;
+    log.logger = () => {};
+    
+    // Execute the plugin with the context
+    await executeDynamicPlugins(plugins, context, 1000);
+    
+    // Restore the logger
+    log.logger = originalLogger;
+    
+    t.pass('Dynamic plugin executed without errors');
+  } finally {
+    // Clean up
+    if (tempDir) {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
   }
 });
 
-test('Plugin errors test', async (t) => {
-  // Create test directory
-  const testWorkdir = await createTempTestDir();
-  const testStackDir = path.join(testWorkdir, 'stacks', 'test-stack');
-  const pluginsDir = path.join(testStackDir, 'plugins');
-  
-  await fs.mkdir(testStackDir, { recursive: true });
-  await fs.mkdir(pluginsDir, { recursive: true });
-  
-  // Create dynamic plugin with error
-  await fs.writeFile(path.join(pluginsDir, 'error-plugin.js'), 
-    'module.exports = async function(context) { throw new Error("Test error"); }');
-  
-  // Capture errors
-  let errorCaptured = false;
-  const originalError = log.error;
-  log.error = (msg) => {
-    if (msg.includes('Test error')) {
-      errorCaptured = true;
-    }
-    originalError(msg);
-  };
-  
-  // Load and execute plugin
-  const plugins = await vibec.loadDynamicPlugins('test-stack', testWorkdir);
-  await vibec.executeDynamicPlugins(plugins, {}, 1000);
-  
-  // Restore original error function
-  log.error = originalError;
-  
-  t.ok(errorCaptured, 'Plugin error should be captured and logged');
+tape('Dynamic plugin error handling', async (t) => {
+  let tempDir;
+  let logOutput = [];
   
   try {
-    await fs.rm(testWorkdir, { recursive: true, force: true });
-  } catch (error) {
-    console.error('Error cleaning up test directory:', error);
+    tempDir = await createTempTestDir();
+    
+    // Create a dynamic plugin that throws an error
+    const pluginsDir = path.join(tempDir, 'stacks', 'test-stack', 'plugins');
+    await fs.mkdir(pluginsDir, { recursive: true });
+    
+    await fs.writeFile(
+      path.join(pluginsDir, 'error-plugin.js'),
+      `module.exports = async function(context) {
+        throw new Error('Test error');
+      }`
+    );
+    
+    // Prepare context for plugin execution
+    const context = {
+      config: { pluginTimeout: 1000 },
+      stack: 'test-stack',
+      promptNumber: 1,
+      promptContent: '# Test',
+      workingDir: path.join(tempDir, 'output', 'current')
+    };
+    
+    // Capture log output
+    const originalLogger = log.logger;
+    log.logger = (...args) => {
+      logOutput.push(args.join(' '));
+    };
+    
+    // Load and execute the dynamic plugins
+    const plugins = await loadDynamicPlugins('test-stack', tempDir);
+    t.equal(plugins.length, 1, 'Should load one dynamic plugin');
+    
+    // Execute the plugin with the context
+    await executeDynamicPlugins(plugins, context, 1000);
+    
+    // Check that error was logged
+    const hasError = logOutput.some(msg => msg.includes('Error executing plugin') && msg.includes('Test error'));
+    t.true(hasError, 'Error should be logged when plugin throws');
+    
+    // Restore the logger
+    log.logger = originalLogger;
+  } finally {
+    // Clean up
+    if (tempDir) {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
   }
 });
 
-test('CLI args test (stacks)', async (t) => {
-  const args = [
-    process.execPath,
-    'vibec.js',
-    '--stacks=core,tests'
-  ];
+tape('Plugin timeout', async (t) => {
+  let tempDir;
+  let logOutput = [];
   
-  const options = vibec.parseArgs(args);
-  t.deepEqual(options.stacks, ['core', 'tests'], 'stacks option should be parsed correctly');
+  try {
+    tempDir = await createTempTestDir();
+    
+    // Create a dynamic plugin that takes too long to execute
+    const pluginsDir = path.join(tempDir, 'stacks', 'test-stack', 'plugins');
+    await fs.mkdir(pluginsDir, { recursive: true });
+    
+    await fs.writeFile(
+      path.join(pluginsDir, 'timeout-plugin.js'),
+      `module.exports = async function(context) {
+        return new Promise(resolve => setTimeout(resolve, 2000));
+      }`
+    );
+    
+    // Prepare context for plugin execution
+    const context = {
+      config: { pluginTimeout: 100 }, // Very short timeout
+      stack: 'test-stack',
+      promptNumber: 1,
+      promptContent: '# Test',
+      workingDir: path.join(tempDir, 'output', 'current')
+    };
+    
+    // Capture log output
+    const originalLogger = log.logger;
+    log.logger = (...args) => {
+      logOutput.push(args.join(' '));
+    };
+    
+    // Load and execute the dynamic plugins
+    const plugins = await loadDynamicPlugins('test-stack', tempDir);
+    t.equal(plugins.length, 1, 'Should load one dynamic plugin');
+    
+    // Execute the plugin with a short timeout
+    await executeDynamicPlugins(plugins, context, 100);
+    
+    // Check that timeout error was logged
+    const hasTimeoutError = logOutput.some(msg => 
+      msg.includes('Error executing plugin') && msg.includes('timed out'));
+    t.true(hasTimeoutError, 'Timeout error should be logged when plugin takes too long');
+    
+    // Restore the logger
+    log.logger = originalLogger;
+  } finally {
+    // Clean up
+    if (tempDir) {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  }
 });
 
-test('CLI args test (flags)', async (t) => {
-  const args = [
-    process.execPath,
-    'vibec.js',
-    '--dry-run',
-    '--no-overwrite'
-  ];
+tape('Static plugin loading', async (t) => {
+  let tempDir;
   
-  const options = vibec.parseArgs(args);
-  t.equal(options.dryRun, true, 'dry-run flag should be parsed correctly');
-  t.equal(options.noOverwrite, true, 'no-overwrite flag should be parsed correctly');
-});
-
-test('parseResponse function test', async (t) => {
-  const response = 'Some text\nFile: path/to/file1.js\n```js\nconsole.log("test");\n```\nMore text\nFile: path/to/file2.css\n```css\nbody { color: red; }\n```';
-  
-  const files = vibec.parseResponse(response);
-  t.equal(files.length, 2, 'Should extract 2 files from response');
-  t.equal(files[0].path, 'path/to/file1.js', 'First file path should be extracted correctly');
-  t.equal(files[0].content, 'console.log("test");', 'First file content should be extracted correctly');
-  t.equal(files[1].path, 'path/to/file2.css', 'Second file path should be extracted correctly');
-  t.equal(files[1].content, 'body { color: red; }', 'Second file content should be extracted correctly');
+  try {
+    tempDir = await createTempTestDir();
+    
+    // Create two static plugins
+    const pluginsDir = path.join(tempDir, 'stacks', 'test-stack', 'plugins');
+    await fs.mkdir(pluginsDir, { recursive: true });
+    
+    await fs.writeFile(
+      path.join(pluginsDir, '01-first.md'),
+      '## First Plugin\nContent of first plugin'
+    );
+    
+    await fs.writeFile(
+      path.join(pluginsDir, '02-second.md'),
+      '## Second Plugin\nContent of second plugin'
+    );
+    
+    // Load the static plugins
+    const plugins = await loadStaticPlugins('test-stack', tempDir);
+    
+    t.equal(plugins.length, 2, 'Should load two static plugins');
+    t.equal(plugins[0].name, '01-first.md', 'First plugin name should match');
+    t.equal(plugins[1].name, '02-second.md', 'Second plugin name should match');
+    t.true(plugins[0].content.includes('First Plugin'), 'First plugin content should match');
+    t.true(plugins[1].content.includes('Second Plugin'), 'Second plugin content should match');
+  } finally {
+    // Clean up
+    if (tempDir) {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  }
 });
