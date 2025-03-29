@@ -19,7 +19,7 @@ Generate a Node.js script with the following content:
     - `--test-cmd "sh output/current/test.sh"`
     - `--api-url` use value from `VIBEC_API_URL` or `'https://openrouter.ai/api/v1'`
     - `--api-key` use value from `VIBEC_API_KEY`
-    - `--model` use value from `VIBEC_MODEL` or `'anthropic/claude-3.7-sonnet'`
+    - `--api-model` use value from `VIBEC_API_MODEL` or `'anthropic/claude-3.7-sonnet'`
 
   - Executes `vibecPath` using `node` with the constructed arguments.
   - Returns the result of the execution.
