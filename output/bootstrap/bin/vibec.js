@@ -6,47 +6,6 @@ const https = require('https');
 const { execSync } = require('child_process');
 
 /**
- * Colored logging utility
- */
-const log = {
-  // Default logger uses console.log
-  logger: console.log,
-  
-  // Color codes
-  colors: {
-    reset: '\x1b[0m',
-    cyan: '\x1b[36m',
-    yellow: '\x1b[33m',
-    red: '\x1b[31m',
-    green: '\x1b[32m',
-    magenta: '\x1b[35m'
-  },
-  
-  // Logging methods
-  info: function(message) {
-    this.logger(`${this.colors.cyan}${message}${this.colors.reset}`);
-  },
-  
-  warn: function(message) {
-    this.logger(`${this.colors.yellow}${message}${this.colors.reset}`);
-  },
-  
-  error: function(message) {
-    this.logger(`${this.colors.red}${message}${this.colors.reset}`);
-  },
-  
-  success: function(message) {
-    this.logger(`${this.colors.green}${message}${this.colors.reset}`);
-  },
-  
-  debug: function(message) {
-    if (process.env.VIBEC_DEBUG) {
-      this.logger(`${this.colors.magenta}${message}${this.colors.reset}`);
-    }
-  }
-};
-
-/**
  * Parse command line arguments.
  * @param {string[]} args - Process argv array
  * @returns {Object} Parsed options
@@ -141,7 +100,7 @@ async function getPromptFiles(stacks, workdir, start, end) {
         }
       }
     } catch (err) {
-      log.error(`Error reading stack directory ${stackDir}: ${err.message}`);
+      console.error(`Error reading stack directory ${stackDir}: ${err.message}`);
       throw err;
     }
   }
@@ -174,14 +133,14 @@ async function buildPrompt(filePath, workdir) {
           const fileContent = await fs.readFile(contextPath, 'utf-8');
           contextContent += `\n\nFile: ${contextFile}\n\`\`\`\n${fileContent}\n\`\`\``;
         } catch (err) {
-          log.warn(`Warning: Could not read context file ${contextFile}: ${err.message}`);
+          console.warn(`Warning: Could not read context file ${contextFile}: ${err.message}`);
         }
       }
     }
     
     return content + contextContent;
   } catch (err) {
-    log.error(`Error building prompt from ${filePath}: ${err.message}`);
+    console.error(`Error building prompt from ${filePath}: ${err.message}`);
     throw err;
   }
 }
@@ -194,10 +153,10 @@ async function buildPrompt(filePath, workdir) {
  */
 async function processLlm(prompt, options) {
   if (options['dry-run']) {
-    log.info('DRY RUN: Prompt would be sent to LLM API:');
-    log.info('-------------------------------------------');
-    log.logger(prompt);
-    log.info('-------------------------------------------');
+    console.log('DRY RUN: Prompt would be sent to LLM API:');
+    console.log('-------------------------------------------');
+    console.log(prompt);
+    console.log('-------------------------------------------');
     return 'File: example/file\n```lang\ncontent\n```';
   }
 
@@ -210,7 +169,7 @@ async function processLlm(prompt, options) {
   const apiModel = options['api-model'];
 
   try {
-    log.info(`Sending prompt to ${apiUrl} using model ${apiModel}...`);
+    console.log(`Sending prompt to ${apiUrl} using model ${apiModel}...`);
     
     const response = await fetch(`${apiUrl}/chat/completions`, {
       method: 'POST',
@@ -238,7 +197,7 @@ async function processLlm(prompt, options) {
     const data = await response.json();
     return data.choices[0].message.content;
   } catch (err) {
-    log.error(`Error processing prompt with LLM API: ${err.message}`);
+    console.error(`Error processing prompt with LLM API: ${err.message}`);
     throw err;
   }
 }
@@ -279,7 +238,7 @@ async function checkOverwrite(files, workdir, noOverwrite) {
     const filePath = path.join(workdir, 'output', 'current', file.path);
     try {
       await fs.access(filePath);
-      log.error(`Error: File ${file.path} already exists and --no-overwrite is set.`);
+      console.error(`Error: File ${file.path} already exists and --no-overwrite is set.`);
       return true;
     } catch (err) {
       // File doesn't exist, which is what we want
@@ -318,9 +277,9 @@ async function writeFiles(files, workdir, stack, promptFile) {
       await fs.writeFile(currentPath, file.content);
       await fs.writeFile(stackPath, file.content);
       
-      log.success(`Written: ${file.path}`);
+      console.log(`Written: ${file.path}`);
     } catch (err) {
-      log.error(`Error writing file ${file.path}: ${err.message}`);
+      console.error(`Error writing file ${file.path}: ${err.message}`);
       throw err;
     }
   }
@@ -343,7 +302,7 @@ async function prepareCurrentDirectory(options) {
     
     // Copy bootstrap files first
     await copyDirectory(bootstrapDir, currentDir);
-    log.info('Copied bootstrap files to output/current/');
+    console.log('Copied bootstrap files to output/current/');
     
     // If start is specified, copy files from previous prompts
     if (options.start !== null) {
@@ -355,7 +314,7 @@ async function prepareCurrentDirectory(options) {
         
         try {
           await copyDirectory(stackOutputDir, currentDir);
-          log.info(`Copied files from ${prompt.stack}/${promptName} to output/current/`);
+          console.log(`Copied files from ${prompt.stack}/${promptName} to output/current/`);
         } catch (err) {
           if (err.code !== 'ENOENT') {
             throw err;
@@ -365,7 +324,7 @@ async function prepareCurrentDirectory(options) {
       }
     }
   } catch (err) {
-    log.error(`Error preparing current directory: ${err.message}`);
+    console.error(`Error preparing current directory: ${err.message}`);
     throw err;
   }
 }
@@ -412,15 +371,15 @@ function runTests(testCmd, workdir) {
   }
   
   try {
-    log.info(`Running tests: ${testCmd}`);
+    console.log(`Running tests: ${testCmd}`);
     execSync(testCmd, { 
       cwd: workdir, 
       stdio: 'inherit' 
     });
-    log.success('Tests passed');
+    console.log('Tests passed');
     return true;
   } catch (err) {
-    log.error(`Tests failed: ${err.message}`);
+    console.error(`Tests failed: ${err.message}`);
     return false;
   }
 }
@@ -431,9 +390,9 @@ function runTests(testCmd, workdir) {
  * @returns {Promise<void>}
  */
 async function main(args) {
-  log.info('Starting LLM code generation process...');
+  console.log('Starting LLM code generation process...');
   const options = parseArgs(args);
-  log.debug('Options: ' + JSON.stringify(options, null, 2));
+  console.log('Options:', JSON.stringify(options, null, 2));
   
   // Prepare output/current directory
   await prepareCurrentDirectory(options);
@@ -446,10 +405,10 @@ async function main(args) {
     options.end
   );
   
-  log.info(`Found ${promptFiles.length} prompt files to process.`);
+  console.log(`Found ${promptFiles.length} prompt files to process.`);
   
   for (const [index, promptFile] of promptFiles.entries()) {
-    log.info(`\nProcessing [${index+1}/${promptFiles.length}]: ${promptFile.stack}/${path.basename(promptFile.file)}`);
+    console.log(`\nProcessing [${index+1}/${promptFiles.length}]: ${promptFile.stack}/${path.basename(promptFile.file)}`);
     
     // Build prompt
     const prompt = await buildPrompt(promptFile.file, options.workdir);
@@ -459,7 +418,7 @@ async function main(args) {
     
     // Parse response
     const files = parseResponse(response);
-    log.info(`Extracted ${files.length} files from LLM response.`);
+    console.log(`Extracted ${files.length} files from LLM response.`);
     
     // Check for overwrites
     const wouldOverwrite = await checkOverwrite(files, options.workdir, options['no-overwrite']);
@@ -484,19 +443,18 @@ async function main(args) {
     }
   }
   
-  log.success('\nCode generation completed successfully.');
+  console.log('\nCode generation completed successfully.');
 }
 
 // Execute main if script is run directly
 if (require.main === module) {
   main(process.argv).catch(err => {
-    log.error(`Error: ${err.message}`);
+    console.error(`Error: ${err.message}`);
     process.exit(1);
   });
 }
 
 module.exports = {
-  log,
   parseArgs,
   getPromptFiles,
   buildPrompt,

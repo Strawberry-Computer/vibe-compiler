@@ -1,13 +1,13 @@
 #!/bin/bash
 set -ex
 
-# Check if the vibec.js exists
-if [ ! -f output/current/bin/vibec.js ]; then
-  echo "Error: output/current/bin/vibec.js does not exist"
+# Check if vibec.js exists
+if [ ! -f "output/current/bin/vibec.js" ]; then
+  echo "Error: vibec.js not found in output/current/bin/"
   exit 1
 fi
 
-# Run the TAP tests
+# Run the test suite
 node output/current/test.js
 
 # Exit with success
