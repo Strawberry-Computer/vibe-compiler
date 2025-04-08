@@ -2,7 +2,7 @@
   "name": "vibec",
   "version": "0.1.0",
   "description": "Vibe Compiler - A self-compiling tool for LLM-powered code generation",
-  "main": "output/current/core/vibec.js",
+  "main": "output/current/bin/vibec.js",
   "bin": {
     "vibec": "bin/vibec"
   },
@@ -18,7 +18,7 @@
   ],
   "files": [
     "bin/vibec",
-    "output/current/core/vibec.js"
+    "output/current/bin/vibec.js"
   ],
   "author": "Vlad Grichina",
   "license": "MIT",
