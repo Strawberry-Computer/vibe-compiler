@@ -2,51 +2,80 @@
 
 # stage-diff.sh - Generate an HTML report showing all stages and their changes
 # Usage: ./stage-diff.sh
-# The script automatically detects all stages and creates a comprehensive report
+# The script automatically detects all stages in output/stacks/ and creates a comprehensive report
+# Stages are expected in format: output/stacks/core/001_add_logging/, output/stacks/tests/001_basic_tests/, etc.
 
 set -e
 
 # Function to display usage
 show_usage() {
   echo "Usage: $0"
-  echo "The script automatically detects all stages and creates a comprehensive report"
+  echo "Generates an HTML report comparing all stages in output/stacks/"
+  echo "Expected stage format: XXX_description (e.g., 001_add_logging)"
   exit 1
 }
 
-# Function to validate stage
+# Function to validate stage directory
 validate_stage() {
   local stage=$1
+  local base_path="output/stacks"
   
   if [[ "$stage" == "current" ]]; then
-    if [[ ! -d "output/current" ]]; then
+    if [[ ! -d "$base_path/../current" ]]; then
       echo "Error: output/current directory not found" >&2
       exit 1
     fi
-    echo "output/current"
+    echo "$base_path/../current"
   else
-    # Accept 1-3 digit numbers and use original name
-    if [[ ! "$stage" =~ ^[0-9]{1,3}$ ]]; then
-      echo "Error: Stage must be a number (1-999) or 'current'" >&2
+    # Validate 3-digit stage number format
+    if [[ ! "$stage" =~ ^[0-9]{3}_ ]]; then
+      echo "Error: Stage must be in format 'XXX_description' (e.g., 001_add_logging) or 'current'" >&2
       exit 1
     fi
-    if [[ ! -d "output/stages/$stage" ]]; then
-      echo "Error: output/stages/$stage directory not found" >&2
+    # Check both core and tests directories
+    local found=false
+    for dir in "core" "tests"; do
+      if [[ -d "$base_path/$dir/$stage" ]]; then
+        echo "$base_path/$dir/$stage"
+        found=true
+        break
+      fi
+    done
+    if [[ "$found" == "false" ]]; then
+      echo "Error: Stage directory $stage not found in $base_path/core/ or $base_path/tests/" >&2
       exit 1
     fi
-    echo "output/stages/$stage"
   fi
 }
 
 # Function to get all available stages in order
 get_all_stages() {
-  # Find all stage directories with 1-3 digits and sort numerically
-  find output/stages -maxdepth 1 -type d -name "[0-9]*" | 
-    sed -e 's|output/stages/||' | 
-    sort -n
+  local stages=()
+  local temp_stages=""
+  # Find all stage directories in core and tests with 3-digit prefix
+  for dir in "core" "tests"; do
+    if [[ -d "output/stacks/$dir" ]]; then
+      temp_stages=$(find "output/stacks/$dir" -maxdepth 1 -type d -name "[0-9][0-9][0-9]_*" | 
+        sed -e "s|output/stacks/$dir/||" | 
+        sort)
+      while IFS= read -r stage; do
+        if [[ -n "$stage" ]]; then
+          stages+=("$stage")
+        fi
+      done <<< "$temp_stages"
+    fi
+  done
+  # Remove duplicates and sort
+  printf '%s\n' "${stages[@]}" | sort -u
 }
 
 # Generate a list of all stages
-all_stages=($(get_all_stages))
+all_stages=()
+while IFS= read -r stage; do
+  if [[ -n "$stage" ]]; then
+    all_stages+=("$stage")
+  fi
+done <<< "$(get_all_stages)"
 
 # Add 'current' at the end if it exists
 if [[ -d "output/current" ]]; then
@@ -55,7 +84,7 @@ fi
 
 # Check if we found any stages
 if [[ ${#all_stages[@]} -eq 0 ]]; then
-  echo "Error: No stages found in output/stages directory"
+  echo "Error: No stages found in output/stacks/core/ or output/stacks/tests/"
   exit 1
 fi
 
@@ -67,14 +96,19 @@ format_stage_name() {
   if [[ "$stage" == "current" ]]; then
     echo "Current"
   else
-    echo "Stage $stage"
+    # Convert 001_add_logging to "Stage 001: Add Logging"
+    local num="${stage:0:3}"
+    local desc="${stage:4}"
+    desc=$(echo "$desc" | sed 's/_/ /g' | 
+           awk '{for(i=1;i<=NF;i++){$i=toupper(substr($i,1,1)) tolower(substr($i,2))}}1')
+    echo "Stage $num: $desc"
   fi
 }
 
 # Function to generate an anchor ID from a stage name
 generate_anchor_id() {
   local stage=$1
-  echo "stage-${stage}"
+  echo "stage-${stage// /_}"
 }
 
 # Function to generate a table of contents entry
@@ -87,18 +121,15 @@ generate_toc_entry() {
 
 # Function to find prompt files for a specific stage
 find_prompt_files() {
-  local stage_num=$1
+  local stage=$1
   
   # Skip if stage is 'current'
-  if [[ "$stage_num" == "current" ]]; then
+  if [[ "$stage" == "current" ]]; then
     return
   fi
   
-  # Match stage number with or without leading zeros
-  local normalized=$(printf "%03d" "$stage_num")
-  find ./stacks -type f -name "[0-9]*_*.md" | 
-    grep -E "/(${stage_num}|${normalized})_" | 
-    sort
+  # Match stage number with 3-digit format
+  find ./stacks -type f -name "${stage}*.md" | sort
 }
 
 # Function to extract and format prompt content
@@ -278,36 +309,35 @@ report_file="stage-comparison-report.html"
 total_stages=${#all_stages[@]}
 for ((i=0; i<total_stages; i++)); do
   current_stage="${all_stages[i]}"
-  # For the first stage, we don't have a previous stage to compare with
+  
   if [[ $i -eq 0 ]]; then
-    # Skip first stage comparison since there's nothing to compare with
-    # But we still want to show the prompt
     stage_path=$(validate_stage "$current_stage")
     stage_name=$(format_stage_name "$current_stage")
     stage_anchor=$(generate_anchor_id "$current_stage")
     
     {
-      # Stage header with navigation
       echo "  <h2 id=\"${stage_anchor}\">${stage_name}</h2>"
       echo "  <div class=\"stage-header\">"
       echo "    <p>This is the first stage in the sequence.</p>"
       echo "  </div>"
       
-      # Navigation
       echo "  <div class=\"stage-navigation\">"
-      echo "    <span></span>" # Empty span for alignment
+      echo "    <span></span>"
       if [[ $i -lt $((total_stages-1)) ]]; then
         next_stage="${all_stages[$((i+1))]}"
         next_anchor=$(generate_anchor_id "$next_stage")
         next_name=$(format_stage_name "$next_stage")
         echo "    <a href=\"#${next_anchor}\">Next: ${next_name} →</a>"
-      else
-        echo "    <span></span>"
       fi
       echo "  </div>"
       
-      # Show prompt content for the current stage
-      prompt_files=($(find_prompt_files "$current_stage"))
+      prompt_files=()
+      while IFS= read -r file; do
+        if [[ -n "$file" ]]; then
+          prompt_files+=("$file")
+        fi
+      done <<< "$(find_prompt_files "$current_stage")"
+      
       if [[ ${#prompt_files[@]} -gt 0 ]]; then
         echo "    <h3>Prompts</h3>"
         for prompt_file in "${prompt_files[@]}"; do
@@ -315,7 +345,6 @@ for ((i=0; i<total_stages; i++)); do
         done
       fi
       
-      # For the first stage, list all initial files
       echo "    <h3>Initial Files</h3>"
       file_count=$(find "$stage_path" -type f | wc -l | tr -d ' ')
       echo "    <p>This stage contains $file_count files.</p>"
@@ -329,11 +358,9 @@ for ((i=0; i<total_stages; i++)); do
       echo "      </ul>"
       echo "    </details>"
     } >> "$report_file"
-    
     continue
   fi
   
-  # For subsequent stages, compare with previous stage
   previous_stage="${all_stages[$((i-1))]}"
   previous_path=$(validate_stage "$previous_stage")
   current_path=$(validate_stage "$current_stage")
@@ -343,31 +370,21 @@ for ((i=0; i<total_stages; i++)); do
   previous_anchor=$(generate_anchor_id "$previous_stage")
   previous_name=$(format_stage_name "$previous_stage")
   
-  # Initialize counters for this stage
   added_files=0
   removed_files=0
   modified_files=0
-  
-  # Create arrays for tracking changes
   added_file_list=()
   removed_file_list=()
   modified_file_list=()
   
-  # Start stage section
   {
-    # Stage header with navigation
     echo "  <h2 id=\"${stage_anchor}\">${stage_name}</h2>"
     echo "  <div class=\"stage-header\">"
     echo "    <p>Changes from ${previous_name} to ${stage_name}</p>"
     echo "  </div>"
     
-    # Navigation
     echo "  <div class=\"stage-navigation\">"
-    if [[ $i -gt 0 ]]; then
-      echo "    <a href=\"#${previous_anchor}\">← Previous: ${previous_name}</a>"
-    else
-      echo "    <span></span>"
-    fi
+    echo "    <a href=\"#${previous_anchor}\">← Previous: ${previous_name}</a>"
     if [[ $i -lt $((total_stages-1)) ]]; then
       next_stage="${all_stages[$((i+1))]}"
       next_anchor=$(generate_anchor_id "$next_stage")
@@ -378,8 +395,13 @@ for ((i=0; i<total_stages; i++)); do
     fi
     echo "  </div>"
     
-    # Show prompt content for the current stage
-    prompt_files=($(find_prompt_files "$current_stage"))
+    prompt_files=()
+    while IFS= read -r file; do
+      if [[ -n "$file" ]]; then
+        prompt_files+=("$file")
+      fi
+    done <<< "$(find_prompt_files "$current_stage")"
+    
     if [[ ${#prompt_files[@]} -gt 0 ]]; then
       echo "  <h3>Prompts</h3>"
       for prompt_file in "${prompt_files[@]}"; do
@@ -387,16 +409,13 @@ for ((i=0; i<total_stages; i++)); do
       done
     fi
     
-    # Find all files in both directories
     current_files=$(find "$current_path" -type f | sort)
     previous_files=$(find "$previous_path" -type f | sort)
     
-    # Find added files (in current but not in previous)
     echo "  <h3>Added Files</h3>"
     for file in $current_files; do
       rel_path="${file#$current_path/}"
       previous_file="$previous_path/$rel_path"
-      
       if [[ ! -f "$previous_file" ]]; then
         added_files=$((added_files + 1))
         added_file_list+=("$rel_path")
@@ -429,12 +448,10 @@ for ((i=0; i<total_stages; i++)); do
       echo "  <p>No files were added in this stage.</p>"
     fi
     
-    # Find removed files (in previous but not in current)
     echo "  <h3>Removed Files</h3>"
     for file in $previous_files; do
       rel_path="${file#$previous_path/}"
       current_file="$current_path/$rel_path"
-      
       if [[ ! -f "$current_file" ]]; then
         removed_files=$((removed_files + 1))
         removed_file_list+=("$rel_path")
@@ -451,7 +468,7 @@ for ((i=0; i<total_stages; i++)); do
       done
       echo "    </ul>"
       echo "    <details>"
-      echo "      <summary>View removed content</summary>"
+      echo "      <summary estabanView removed content</summary>"
       for file in "${removed_file_list[@]}"; do
         previous_file="$previous_path/$file"
         echo "      <h4>$file</h4>"
@@ -467,18 +484,13 @@ for ((i=0; i<total_stages; i++)); do
       echo "  <p>No files were removed in this stage.</p>"
     fi
     
-    # Find modified files (in both but different)
     echo "  <h3>Modified Files</h3>"
     for file in $current_files; do
       rel_path="${file#$current_path/}"
       previous_file="$previous_path/$rel_path"
-      
-      if [[ -f "$previous_file" ]]; then
-        # Compare files
-        if ! cmp -s "$file" "$previous_file"; then
-          modified_files=$((modified_files + 1))
-          modified_file_list+=("$rel_path")
-        fi
+      if [[ -f "$previous_file" ]] && ! cmp -s "$file" "$previous_file"; then
+        modified_files=$((modified_files + 1))
+        modified_file_list+=("$rel_path")
       fi
     done
     
@@ -498,7 +510,6 @@ for ((i=0; i<total_stages; i++)); do
         previous_file="$previous_path/$file"
         echo "      <h4>$file</h4>"
         echo "      <pre>"
-        # Generate diff and colorize output
         diff -u "$previous_file" "$current_file" | tail -n +3 | sed 's/</\</g; s/>/\>/g' | while read -r line; do
           if [[ $line == -* ]]; then
             echo "<span class=\"diff-removed\">$line</span>"
@@ -516,7 +527,6 @@ for ((i=0; i<total_stages; i++)); do
       echo "  <p>No files were modified in this stage.</p>"
     fi
     
-    # Add stage summary
     echo "  <div class=\"summary\">"
     echo "    <h3>Stage Summary</h3>"
     echo "    <ul>"
@@ -526,7 +536,6 @@ for ((i=0; i<total_stages; i++)); do
     echo "      <li>Total changes: $((added_files + removed_files + modified_files))</li>"
     echo "    </ul>"
     echo "  </div>"
-    
     echo "  <hr class=\"hr\">"
   } >> "$report_file"
 done
@@ -540,12 +549,4 @@ done
 echo "Report generated: $report_file"
 echo "All stages processed successfully"
 
-# Open the report in the default browser (uncomment if desired)
-# if command -v open > /dev/null; then
-#   open "$report_file"
-# elif command -v xdg-open > /dev/null; then
-#   xdg-open "$report_file"
-# fi
-
-exit 0
 exit 0
