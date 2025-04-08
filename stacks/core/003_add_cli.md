@@ -11,6 +11,7 @@ Enhance CLI parsing in `vibec.js` with additional options.
 
 ### Implementation Notes
 - Ensure proper JavaScript syntax: use quoted strings and close all objects.
+- Keep `parseArgs` stateless and pure. Don't log anything. When any error occurs, it should throw. Caller should catch and handle (e.g. log and `process.exit(1)`).
 
 ## Context: bin/vibec.js
 ## Output: bin/vibec.js

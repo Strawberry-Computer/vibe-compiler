@@ -10,7 +10,7 @@ Generate a Node.js script with the following content:
 ## getHighestStage
   - scan stacks/core/ and stacks/tests/ from stacks parameter defaulting to ['core', 'tests'] for highest ###_*.md number
 ## runStage:
-  - Accepts parameters: `vibecPath`, `stage`, and `stacks` (defaulting to `'core,tests'`).
+  - Accepts parameters: `stage`, and `stacks` (defaulting to `'core,tests'`).
   - Print 2 new lines before each stage
   - Constructs arguments for `child_process.spawnSync`:
     - `--start <stage>`
@@ -20,13 +20,11 @@ Generate a Node.js script with the following content:
     - `--api-url` use value from `VIBEC_API_URL` or `'https://openrouter.ai/api/v1'`
     - `--api-key` use value from `VIBEC_API_KEY`
     - `--api-model` use value from `VIBEC_API_MODEL` or `'anthropic/claude-3.7-sonnet'`
-
-  - Executes `vibecPath` using `node` with the constructed arguments.
+  - Executes `output/current/bin/vibec.js` using `node` with the constructed arguments.
   - Returns the result of the execution.
 
 # Main flow:
-  - Copy bin/test.sh to output/current/test.sh (chmod 755) if missing
-  - Copy bin/vibec.js to output/current/bin/vibec.js (chmod 644) if missing
+  - Copy file structure from `output/bootstrap/` to `output/current/` recursively
   - Run stages 1 to highest using `runStage`
   - Wrap bootstrap in a .catch block to handle errors
 

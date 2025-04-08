@@ -7,7 +7,7 @@
     "vibec": "bin/vibec"
   },
   "scripts": {
-    "bootstrap": "node bootstrap.js",
+    "bootstrap": "node output/bootstrap/bootstrap.js",
     "test": "sh output/current/test.sh"
   },
   "keywords": [

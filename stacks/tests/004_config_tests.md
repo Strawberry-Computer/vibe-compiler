@@ -37,5 +37,8 @@ Add tests for config loading in `bin/vibec.js`:
         - end: null
       - Verify `VIBEC_STACKS` string is converted to array
 
+IMPORTANT:
+  - Use `t.throws` to verify errors are thrown. There is no such thing as `t.rejects`.
+
 ## Context: bin/vibec.js, test.js
 ## Output: test.js

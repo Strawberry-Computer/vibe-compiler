@@ -23,6 +23,7 @@ Generate a Node.js script with the following content:
   - `--test-cmd`: Command to execute tests after processing (default: `null`)
   - it should take `process.argv` as an argument and return an object with the parsed options
   - support both --option=value and --option value syntax
+  - for boolean flags, it should be true if the flag is present, false otherwise or if false is explicitly set, e.g. `--no-overwrite=false` or `--no-overwrite false`
 
 ## getPromptFiles
 - Scan `stacks/<stack>` for `###_*.md` files from an array of stacks.
@@ -59,7 +60,7 @@ Generate a Node.js script with the following content:
   - Process prompts using `processLlm` to generate responses.
   - Parse responses using `parseResponse` to extract file content.
   - Check for overwrites using `checkOverwrite` if `--no-overwrite` is set.
-  - At start reconstruct the `output/current/` directory by copying generated files from the `output/stacks/` directory to match given `--start`.
+  - At start reconstruct the `output/current/` directory by copying generated files from the `output/stacks/` directory to match given `--start`. Initialize with `output/bootstrap/` files before that.
   - Write files to `output/stacks/<stack>/<prompt-file-name-without-md>/` and `output/current/` using `writeFiles`.
   - Run tests using `runTests` if a `--testCmd` is provided.
   - Exit with an error code if any step fails.

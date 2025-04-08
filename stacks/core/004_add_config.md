@@ -5,7 +5,8 @@ Add `vibec.json` loading to vibec.js, merging with existing CLI and env vars (pr
 - Merge options with existing CLI args and env vars, using defaults only for unset values.
 - Convert `VIBEC_STACKS` to array if string.
 - Validate: `retries` ≥ 0, `pluginTimeout` > 0, log errors with `log` utility.
-- Ensure proper JavaScript syntax: quoted strings, closed objects.
+- Update `parseArgs` to handle `vibec.json` and merge with CLI and env vars. It should take `process.env` and `vibecJson` as arguments in addition to `process.argv`.`
+- Throw error if `vibec.json` is malformed JSON.
 
 ## Config Options (vibec.json)
 - `workdir`: String, working directory. Default: `.`.
