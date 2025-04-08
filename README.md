@@ -1,6 +1,6 @@
 # Vibe Compiler (vibec)
 
-A self-compiling tool to process vibe-coded projects using prompt stacks and LLM generation.
+A self-compiling tool that transforms prompt stacks into code and tests using LLM generation.
 
 ## Overview
 
@@ -115,113 +115,91 @@ Configure via `vibec.json`:
 }
 ```
 
-Options are merged with priority: CLI > environment variables > `vibec.json` > defaults. Validation:
-- `retries` must be ≥ 0.
-- `pluginTimeout` must be > 0.
+Option precedence: CLI > Environment Variables > `vibec.json` > Defaults
+Validation:
+- `retries`: Must be non-negative (≥ 0)
+- `pluginTimeout`: Must be positive (> 0)
+- Malformed JSON in `vibec.json` triggers an error log and falls back to defaults
 
 ### Environment Variables
 
-Override config with:
-- `VIBEC_STACKS`: Comma-separated stack list (e.g., `core,tests`).
-- `VIBEC_TEST_CMD`: Test command.
-- `VIBEC_RETRIES`: Number of retries (e.g., `2`).
-- `VIBEC_PLUGIN_TIMEOUT`: JS plugin timeout in ms (e.g., `5000`).
-- `VIBEC_API_URL`: LLM API endpoint.
-- `VIBEC_API_KEY`: LLM API key (preferred over config).
-- `VIBEC_API_MODEL`: Model for code generation.
-- `VIBEC_DEBUG`: Enable debug logging (`1` to enable).
+- `VIBEC_STACKS`: Comma-separated stacks (e.g., `core,tests`)
+- `VIBEC_TEST_CMD`: Test command
+- `VIBEC_RETRIES`: Retry count
+- `VIBEC_PLUGIN_TIMEOUT`: Plugin timeout (ms)
+- `VIBEC_API_URL`: LLM API endpoint
+- `VIBEC_API_KEY`: LLM API key (recommended over config)
+- `VIBEC_API_MODEL`: LLM model
+- `VIBEC_DEBUG`: Enable debug logging (`1` to enable)
 
 ### LLM Integration
 
-Supports OpenAI-compatible APIs (e.g., OpenAI, OpenRouter). Set `VIBEC_API_URL` and `VIBEC_API_KEY` (use env vars for security).
+Compatible with OpenAI-style APIs. Configure via `VIBEC_API_URL` and `VIBEC_API_KEY`.
 
 ## Prompt Structure
 
-Prompts use:
+Prompts use markdown:
 ```markdown
 # Component Name
 
-Description of what to generate.
+Description of the generation task.
 
 ## Context: file1.js, file2.js
-## Output: path/to/output1.js
+## Output: path/to/output.js
 ```
 
-- `## Context:` - Files to include.
-- `## Output:` - Where to save generated code (multiple allowed).
+- `## Context:`: Reference files for context
+- `## Output:`: Specify output file paths (multiple allowed)
 
 ## Plugin System
 
-Plugin support is added via `stacks/core/002_add_plugins.md`. After this stage:
-- **Static Plugins (`.md`)**: Place in `stacks/<stack>/plugins/` (e.g., `stacks/core/plugins/coding-style.md`). Their content appends to every prompt in the stack in alphabetical order.
-- **Dynamic Plugins (`.js`)**: Place in `stacks/<stack>/plugins/`. Export an async function with a configurable timeout (default 5000ms):
+Added in stage `002_add_plugins.md`:
+- **Static Plugins (`.md`)**: Stored in `stacks/<stack>/plugins/`, appended to prompts in alphabetical order
+- **Dynamic Plugins (`.js`)**: Async functions in `stacks/<stack>/plugins/`, executed with configurable timeout:
   ```javascript
-  module.exports = async (context) => {
+  module.exports = async ({ config, stack, promptNumber, promptContent, workingDir, testCmd, testResult }) => {
     return "Generated content";
   };
   ```
-  Context includes:
-  ```javascript
-  {
-    config: { /* vibec.json */ },
-    stack: "core",
-    promptNumber: 1,
-    promptContent: "# CLI Parser\n...",
-    workingDir: "/path/to/output/current",
-    testCmd: "npm test",
-    testResult: { errorCode: 1, stdout: "...", stderr: "..." } // Only during retries
-  }
-  ```
-- Errors in plugins are logged with `log.error` and skipped without halting execution.
+- Plugin errors are logged and skipped without halting execution
 
 ## Development
 
-### Adding New Prompts
+### Adding Prompts
 
-1. Create a new file in a stack (e.g., `stacks/core/005_feature.md`).
-2. Use `NNN_name.md` naming with numerical prefix.
-3. Define outputs with `## Output: path/to/file.js`.
-
-### Self-Improvement
-
-Each stage builds on prior improvements, evolving `vibec.js` during compilation.
+1. Create a new numbered file (e.g., `stacks/core/005_new_feature.md`)
+2. Use `NNN_name.md` naming convention
+3. Specify outputs with `## Output:`
 
 ### Testing
 
-Tests are generated via `stacks/tests/`:
-- `test.sh` validates `vibec.js` execution and runs `test.js`.
-- `test.js` uses `tape` to verify logging, plugins, CLI, and config (no external dependencies beyond Node builtins).
+Tests in `stacks/tests/` generate:
+- `test.sh`: Validates `vibec.js` and runs `test.js`
+- `test.js`: Uses `tape` for unit tests (Node builtins only)
 
 ## Tutorial: Building a Simple Pong Game
 
-Here’s how to use `vibec` to create a basic web-based Pong game from scratch:
-
-### Step 1: Set Up a New Project
-Create a new directory for your game:
+### 1. Initialize Project
 ```bash
-mkdir pong-game
-cd pong-game
-mkdir stacks stacks/pong output
+mkdir pong-game && cd pong-game
+mkdir -p stacks/pong output
 ```
 
-### Step 2: Create a Prompt Stack
-Add a stack for your game in `stacks/pong/`. Start with an initial prompt:
-
+### 2. Define Initial Prompt
 ```markdown stacks/pong/001_create_pong.md
-# Pong Game Initial Setup
+# Pong Game Base
 
-Generate a simple Pong game with HTML, CSS, and JavaScript:
-- HTML: Basic structure with a canvas element.
-- CSS: Style the canvas with a black background and center it.
-- JS: Use Canvas API to draw a paddle, a ball, and basic movement (left/right paddle with arrow keys).
+Create a basic Pong game:
+- HTML: Canvas element in a centered container
+- CSS: Black canvas with borders
+- JS: Canvas-based paddle and ball with arrow key controls
 
 ## Output: output/current/index.html
 ## Output: output/current/styles.css
 ## Output: output/current/game.js
 ```
 
-### Step 3: Configure vibec.json
-Create a `vibec.json` to target your new stack:
+### 3. Configure
 ```json vibec.json
 {
   "stacks": ["pong"],
@@ -229,65 +207,40 @@ Create a `vibec.json` to target your new stack:
 }
 ```
 
-### Step 4: Compile the Project
-Run `vibec` to generate the game files:
+### 4. Compile
 ```bash
 export VIBEC_API_KEY=your_api_key_here
 npx vibec
 ```
 
-This processes `stacks/pong/` and outputs files to `output/current/`.
-
-### Step 5: Test the Output
-Serve the game locally (e.g., using Python’s HTTP server):
+### 5. Test
 ```bash
 cd output/current
 python3 -m http.server 8000
 ```
-Open `http://localhost:8000` in your browser to play the basic Pong game.
+Visit `http://localhost:8000`.
 
-### Step 6: Enhance with More Prompts
-Add another prompt to improve the game:
-
+### 6. Enhance
 ```markdown stacks/pong/002_add_score.md
-# Add Scoring to Pong
+# Pong Scoring
 
-Enhance the Pong game by adding:
-- A score display for the player.
-- Increment score when the ball passes the paddle (reset ball position).
+Add scoring:
+- Display score above canvas
+- Increment when ball passes paddle, reset ball
 
 ## Context: output/current/index.html, output/current/game.js
 ## Output: output/current/game.js
 ```
+Re-run `npx vibec`.
 
-Run `vibec` again:
-```bash
-npx vibec
-```
-
-### Step 7: Iterate and Debug
-Check `output/stages/` for each stage’s output and `output/current/` for the latest version. Use `VIBEC_DEBUG=1` to see detailed logs if something goes wrong:
-```bash
-export VIBEC_DEBUG=1
-npx vibec
-```
-
-That’s it! You’ve built and enhanced a Pong game using `vibec`’s prompt-driven workflow.
+### 7. Debug
+Use `VIBEC_DEBUG=1 npx vibec` for detailed logs.
 
 ## Troubleshooting
 
-### Common Issues
-
-- **API Key Not Found**: Set `VIBEC_API_KEY`.
-- **No output**: Check prompt format with `## Output:` or ensure `vibec` is installed/accessible via `npx`.
-- **Command not found**: Install globally with `npm install -g vibec` or use `npx vibec`.
-
-### Debug Mode
-
-```bash
-export VIBEC_DEBUG=1
-npx vibec
-```
+- **API Key Missing**: Set `VIBEC_API_KEY`
+- **No Output**: Verify `## Output:` in prompts
+- **Command Not Found**: Use `npx vibec` or install globally
 
 ## License
 
