@@ -1,27 +1,26 @@
-#!/bin/bash
+#!/usr/bin/env node
 
-# bin/vibec - Launch the latest bootstrapped vibec.js with provided arguments
-# Usage: ./bin/vibec [args...]
+const path = require('path');
+const fs = require('fs');
 
-# Exit on any error
-set -e
+try {
+    // Resolve the path to vibec.js relative to this script
+    const vibecJs = path.resolve(__dirname, '..', 'output', 'current', 'bin', 'vibec.js');
 
-# Get the directory where this script is located
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+    // Check if the file exists
+    if (!fs.existsSync(vibecJs)) {
+        console.error(`Error: vibec.js not found at ${vibecJs}`);
+        process.exit(1);
+    }
 
-# Define the latest bootstrapped vibec.js location relative to script dir
-LATEST_VIBEC_JS="$SCRIPT_DIR/../output/current/bin/vibec.js"
+    // Inform user which file is being used
+    console.log(`Using vibec.js from: ${vibecJs}`);
 
-# Check if the latest vibec.js exists
-if [[ ! -f "$LATEST_VIBEC_JS" ]]; then
-  echo "Error: Latest bootstrapped vibec.js not found at $LATEST_VIBEC_JS" >&2
-  exit 1
-fi
+    // Import and run the main program
+    const vibec = require(vibecJs);
+    vibec.main(process.argv.slice(2));
 
-# Inform user which file is being used
-echo "Using latest bootstrapped vibec.js from: $LATEST_VIBEC_JS"
-
-# Launch vibec.js with all provided arguments using Node.js
-node "$LATEST_VIBEC_JS" "$@"
-
-exit 0
+} catch (error) {
+    console.error('Error launching vibec:', error.message);
+    process.exit(1);
+}
