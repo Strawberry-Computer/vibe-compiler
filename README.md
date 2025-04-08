@@ -4,102 +4,108 @@ A self-compiling tool that transforms prompt stacks into code and tests using LL
 
 ## Overview
 
-`vibec` transforms stacks of prompts into code and tests, supporting static `.md` and dynamic `.js` plugins. It outputs staged artifacts (`output/stages/`) for Git history and a current runtime version (`output/current/`) aggregated from all stages with a "Last-Wins" strategy. It can compile itself using its own structure.
+`vibec` is a unique compiler that processes markdown-based prompt stacks to generate code, tests, and documentation. It can compile itself through a bootstrap process, evolving its own implementation (`bin/vibec.js`) across numbered stages. The tool supports both static (`.md`) and dynamic (`.js`) plugins, maintains staged outputs in `output/stages/` for Git history, and aggregates the latest runtime version in `output/current/` using a "Last-Wins" merge strategy.
 
 ## Project Structure
 
 ```
 vibec/
-├── bin/
-│   ├── vibec.js            # Single, complete implementation
-│   └── test.sh             # Test script
-├── bootstrap.js            # Progressive bootstrapping script
-├── stacks/
-│   ├── core/               # Core functionality prompts
-│   │   ├── 001_add_logging.md  # Colored logging
-│   │   ├── 002_add_plugins.md  # Plugin support
-│   │   ├── 003_add_cli.md      # Expanded CLI options
-│   │   ├── 004_add_config.md   # Config loading
-│   │   └── plugins/            # User-defined plugins
-│   │       └── coding-style.md # Example static plugin
-│   ├── tests/              # Test generation prompts 
-│   │   ├── 001_basic_tests.md  # Basic execution and logging tests
-│   │   ├── 002_feature_tests.md # Plugin and CLI feature tests
-│   │   ├── 003_cli_tests.md    # Expanded CLI tests
-│   │   └── 004_config_tests.md # Configuration tests
-│   └── plugins/            # Additional plugins (optional)
-├── output/
-│   ├── stages/             # Isolated stage outputs
-│   │   ├── 1/
-│   │   ├── 2/
-│   │   └── ...
-│   └── current/            # Latest merged output
-├── .vibec_hashes.json      # Tracks prompt hashes and test results
-├── vibec.json              # Configuration
-└── package.json
+├── bin/                    # Initial implementation
+│   ├── vibec.js           # Core compiler script
+│   └── test.sh            # Test runner
+├── bootstrap/             # Bootstrap documentation
+├── stacks/                # Prompt stacks
+│   ├── core/             # Core functionality
+│   │   ├── 001_add_logging.md
+│   │   ├── 002_add_plugins.md
+│   │   ├── 003_add_cli.md
+│   │   ├── 004_add_config.md
+│   │   └── plugins/      # Core plugins
+│   └── tests/            # Test generation
+├── output/               # Generated artifacts
+│   ├── bootstrap/       # Bootstrap outputs
+│   │   ├── bin/        # Bootstrap compiler
+│   │   │   └── vibec.js
+│   │   ├── bootstrap.js # Bootstrap script
+│   │   └── test.sh     # Bootstrap test script
+│   ├── current/        # Latest merged runtime version
+│   │   ├── bin/       # Current compiler
+│   │   │   └── vibec.js
+│   │   ├── bootstrap.js # Current bootstrap script
+│   │   ├── test.js     # Current test suite
+│   │   └── test.sh     # Current test script
+│   └── stacks/         # Staged stack outputs
+│       ├── core/      # Core stack stages
+│       │   ├── 001_add_logging/
+│       │   │   └── bin/
+│       │   │       └── vibec.js
+│       │   ├── 002_add_plugins/
+│       │   │   └── bin/
+│       │   │       └── vibec.js
+│       │   ├── 003_add_cli/
+│       │   │   └── bin/
+│       │   │       └── vibec.js
+│       │   ├── 004_add_config/
+│       │   │   └── bin/
+│       │   │       └── vibec.js
+│       └── tests/     # Test stack stages
+│           ├── 001_basic_tests/
+│           │   ├── test.js
+│           │   └── test.sh
+│           ├── 003_cli_tests/
+│           │   └── test.js
+│           └── 004_config_tests/
+│               └── test.js
+├── .vibec_hashes.json    # Prompt hashes and test results
+├── vibec.json            # Configuration file
+└── package.json          # Node dependencies
 ```
 
 ## Architecture
 
-Vibec uses a progressive bootstrapping approach:
-1. Starts with the base implementation (`bin/vibec.js`).
-2. Processes each numerical stage (001, 002, etc.) in order.
-3. Checks for a new `vibec.js` after each stage and uses it for subsequent stages if generated.
-4. Creates a self-improving cycle where vibec evolves during the build.
+`vibec` employs a progressive bootstrapping process:
+1. Begins with the initial `bin/vibec.js` implementation
+2. Processes numbered stages sequentially (001, 002, etc.)
+3. Updates `vibec.js` when generated in a stage, using the new version for subsequent stages
+4. Creates a self-improving cycle where the compiler evolves during compilation
 
 ## Getting Started
 
 ### Installation
 
-To use `vibec` for your own projects:
-1. Install it globally:
-   ```bash
-   npm install -g vibec
-   ```
-   Or use `npx` without installing:
-   ```bash
-   npx vibec --version
-   ```
+Install globally:
+```bash
+npm install -g vibec
+```
+Or use via npx:
+```bash
+npx vibec --version
+```
 
-2. Set up your API key for LLM integration:
-   ```bash
-   export VIBEC_API_KEY=your_api_key_here
-   ```
+Set your LLM API key:
+```bash
+export VIBEC_API_KEY=your_api_key_here
+```
 
 ### Usage
 
-Run vibec with:
+Run with custom options:
 ```bash
 npx vibec --stacks=core,tests --test-cmd="npm test" --retries=2 --plugin-timeout=5000 --output=output
 ```
 
-Supported CLI options:
-- `--stacks=<stack1,stack2,...>`: Stacks to process (e.g., `core,tests`). Default: `core`.
-- `--no-overwrite`: Prevent file overwrites. Flag, default: false.
-- `--dry-run`: Simulate without changes. Flag, default: false.
-- `--api-url=<url>`: LLM API URL. Default: `https://api.anthropic.com/v1`.
-- `--api-model=<model>`: LLM model. Default: `claude-3-7-sonnet`.
-- `--test-cmd=<command>`: Test command (e.g., `npm test`). Default: none.
-- `--retries=<number>`: Retry count, non-negative integer. Default: 0.
-- `--plugin-timeout=<ms>`: JS plugin timeout in ms, positive integer. Default: 5000.
-- `--output=<dir>`: Output directory. Default: `output`.
-- `--help`: Show usage and exit. Example output:
-  ```
-  Usage: vibec [options]
-  Options:
-    --stacks=<stack1,stack2,...>  Stacks to process (default: core)
-    --no-overwrite                Prevent file overwrites
-    --dry-run                     Simulate without changes
-    --api-url=<url>               LLM API URL
-    --api-model=<model>           LLM model
-    --test-cmd=<command>          Test command
-    --retries=<number>            Retry count
-    --plugin-timeout=<ms>         JS plugin timeout
-    --output=<dir>                Output directory
-    --help                        Show this help
-    --version                     Show version
-  ```
-- `--version`: Show version (e.g., `vibec v1.0.0`) and exit.
+CLI options:
+- `--stacks=<stack1,stack2,...>`: Stacks to process (default: `core`)
+- `--no-overwrite`: Prevent overwriting files (default: `false`)
+- `--dry-run`: Simulate without modifications (default: `false`)
+- `--api-url=<url>`: LLM API endpoint (default: `https://api.anthropic.com/v1`)
+- `--api-model=<model>`: LLM model (default: `claude-3-7-sonnet`)
+- `--test-cmd=<command>`: Test command to run (default: none)
+- `--retries=<number>`: Retry attempts (≥ 0, default: `0`)
+- `--plugin-timeout=<ms>`: JS plugin timeout in ms (> 0, default: `5000`)
+- `--output=<dir>`: Output directory (default: `output`)
+- `--help`: Display usage information
+- `--version`: Show version (e.g., `vibec v1.0.0`)
 
 ### Configuration
 
