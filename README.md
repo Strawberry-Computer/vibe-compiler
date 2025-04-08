@@ -200,9 +200,9 @@ Create a basic Pong game:
 - CSS: Black canvas with borders
 - JS: Canvas-based paddle and ball with arrow key controls
 
-## Output: output/current/index.html
-## Output: output/current/styles.css
-## Output: output/current/game.js
+## Output: index.html
+## Output: styles.css
+## Output: game.js
 ```
 
 ### 3. Configure
@@ -234,8 +234,8 @@ Add scoring:
 - Display score above canvas
 - Increment when ball passes paddle, reset ball
 
-## Context: output/current/index.html, output/current/game.js
-## Output: output/current/game.js
+## Context: index.html, game.js
+## Output: game.js
 ```
 Re-run `npx vibec`.
 
