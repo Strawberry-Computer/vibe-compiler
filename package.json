@@ -1,6 +1,6 @@
 {
   "name": "vibec",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Vibe Compiler - A self-compiling tool for LLM-powered code generation",
   "main": "output/current/bin/vibec.js",
   "bin": {
