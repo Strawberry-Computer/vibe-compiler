@@ -18,7 +18,7 @@ try {
 
     // Import and run the main program
     const vibec = require(vibecJs);
-    vibec.main(process.argv.slice(2));
+    vibec.main(process.argv);
 
 } catch (error) {
     console.error('Error launching vibec:', error.message);
