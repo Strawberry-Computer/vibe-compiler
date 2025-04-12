@@ -607,7 +607,6 @@ async function buildPrompt(filePath, workdir, stack, promptNumber, config, testO
       }
     }
     
-    console.log('content + contextContent', content + contextContent);
     return content + contextContent;
   } catch (err) {
     log.error(`Error building prompt from ${filePath}: ${err.message}`);
