@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Exit on error and print commands as they run
+# Exit on error, print commands as they run, and fail pipelines if any command fails
 set -ex
+set -o pipefail
 
 mkdir -p output/bootstrap/bin
 
