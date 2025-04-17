@@ -8,7 +8,7 @@
   },
   "scripts": {
     "bootstrap": "node output/bootstrap/bootstrap.js",
-    "test": "sh output/current/test.sh"
+    "test": "cd output/current; sh test.sh"
   },
   "keywords": [
     "compiler",

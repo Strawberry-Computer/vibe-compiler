@@ -60,7 +60,10 @@ Generate a Node.js script with the following content:
   - Process prompts using `processLlm` to generate responses.
   - Parse responses using `parseResponse` to extract file content.
   - Check for overwrites using `checkOverwrite` if `--no-overwrite` is set.
-  - At start reconstruct the `output/current/` directory by copying generated files from the `output/stacks/` directory to match given `--start`. Initialize with `output/bootstrap/` files before that.
+  - Before running any stage, reconstruct the `output/current/` directory:
+    - initialize with `output/bootstrap/` files
+    - copy generated files from the `output/stacks/` directory to match given `--start`
+    - copy even stacks that are not in the `--stacks` argument
   - Write files to `output/stacks/<stack>/<prompt-file-name-without-md>/` and `output/current/` using `writeFiles`.
   - Run tests using `runTests` if a `--testCmd` is provided.
   - Exit with an error code if any step fails.

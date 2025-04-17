@@ -8,7 +8,6 @@ Add tests for plugins, CLI, and config in `bin/vibec.js`:
     - Test static `.md` plugin: Append mock content, run `main()` with `--api-url=http://localhost:3000 --dry-run=false --stacks=test-stack`, check `output/current/test.js`.
     - Test dynamic `.js` plugin: Mock plugin returning "test", run with timeout, verify result.
     - Test plugin error: Mock error, ensure logged and skipped.
-    - Cleanup server in `finally`.
   - CLI (Dry-Run):
     - `--stacks=core,tests`: Parse args in dry-run, verify options.
     - `--no-overwrite`, `--dry-run`: Verify flags set.

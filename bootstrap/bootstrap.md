@@ -16,7 +16,7 @@ Generate a Node.js script with the following content:
     - `--start <stage>`
     - `--end <stage>`
     - `--stacks <stacks>`
-    - `--test-cmd "sh output/current/test.sh"`
+    - `--test-cmd "sh test.sh"`
     - `--api-url` use value from `VIBEC_API_URL` or `'https://openrouter.ai/api/v1'`
     - `--api-key` use value from `VIBEC_API_KEY`
     - `--api-model` use value from `VIBEC_API_MODEL` or `'anthropic/claude-3.7-sonnet'`
