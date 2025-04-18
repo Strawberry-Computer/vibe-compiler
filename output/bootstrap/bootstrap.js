@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const fs = require('fs').promises;
+const { promises: fs } = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
@@ -8,18 +8,19 @@ async function getHighestStage(stacks = ['core', 'tests']) {
   let highestStage = 0;
 
   for (const stack of stacks) {
-    const stackPath = `stacks/${stack}/`;
-    
+    const dirPath = path.join('stacks', stack);
     try {
-      const files = await fs.readdir(stackPath);
+      const files = await fs.readdir(dirPath);
       for (const file of files) {
-        if (file.match(/^\d+_.*\.md$/)) {
-          const stage = parseInt(file.split('_')[0], 10);
-          highestStage = Math.max(highestStage, stage);
+        if (file.match(/^(\d+)_.*\.md$/)) {
+          const stage = parseInt(RegExp.$1, 10);
+          if (stage > highestStage) {
+            highestStage = stage;
+          }
         }
       }
-    } catch (error) {
-      console.error(`Error reading directory ${stackPath}:`, error);
+    } catch (err) {
+      console.error(`Error scanning directory ${dirPath}:`, err);
     }
   }
 
@@ -27,8 +28,7 @@ async function getHighestStage(stacks = ['core', 'tests']) {
 }
 
 function runStage(stage, stacks = 'core,tests') {
-  console.log('\n\n');
-  console.log(`Running stage ${stage}...`);
+  console.log(`\n\nRunning stage ${stage}...`);
   
   const apiUrl = process.env.VIBEC_API_URL || 'https://openrouter.ai/api/v1';
   const apiKey = process.env.VIBEC_API_KEY;
@@ -39,59 +39,71 @@ function runStage(stage, stacks = 'core,tests') {
     '--start', stage.toString(),
     '--end', stage.toString(),
     '--stacks', stacks,
-    '--test-cmd', 'sh output/current/test.sh',
+    '--test-cmd', 'yarn test',
     '--api-url', apiUrl,
+    '--api-key', apiKey,
     '--api-model', apiModel
   ];
   
-  if (apiKey) {
-    args.push('--api-key', apiKey);
-  }
+  console.log(`Executing: node ${args.join(' ')}`);
   
-  const result = spawnSync('node', args, { 
-    stdio: 'inherit',
-    env: process.env
+  return spawnSync('node', args, { 
+    stdio: 'inherit', 
+    env: process.env 
   });
-  
-  return result;
+}
+
+async function copyDir(src, dest) {
+  await fs.mkdir(dest, { recursive: true });
+  const entries = await fs.readdir(src, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+
+    if (entry.isDirectory()) {
+      await copyDir(srcPath, destPath);
+    } else {
+      await fs.copyFile(srcPath, destPath);
+    }
+  }
 }
 
 async function bootstrap() {
   try {
-    console.log('Copying bootstrap files to current directory...');
-    await fs.mkdir('output/current', { recursive: true });
+    console.log('Copying bootstrap files to output/current/...');
+    await copyDir('output/bootstrap', 'output/current');
+    console.log('Copy complete');
+
+    const stacksArray = ['core', 'tests'];
+    const stacksString = stacksArray.join(',');
+    const highestStage = await getHighestStage(stacksArray);
     
-    // Copy files from bootstrap to current
-    const copyProcess = spawnSync('cp', ['-r', 'output/bootstrap/.', 'output/current/'], { 
-      stdio: 'inherit'
-    });
-    
-    if (copyProcess.error) {
-      console.error('Error copying bootstrap files:', copyProcess.error);
-      process.exit(1);
-    }
-    
-    const stacks = ['core', 'tests'];
-    const highestStage = await getHighestStage(stacks);
-    console.log(`Found highest stage: ${highestStage}`);
-    
-    // Run stages 1 to highest
+    console.log(`Highest stage found: ${highestStage}`);
+
+    let success = true;
     for (let stage = 1; stage <= highestStage; stage++) {
-      const result = runStage(stage, stacks.join(','));
+      const result = runStage(stage, stacksString);
       if (result.status !== 0) {
-        console.error(`Stage ${stage} failed with exit code ${result.status}`);
-        process.exit(result.status);
+        console.error(`Stage ${stage} failed with exit code: ${result.status}`);
+        success = false;
+        break;
       }
     }
-    
-    console.log('Bootstrap completed successfully!');
-  } catch (error) {
-    console.error('Bootstrap failed:', error);
+
+    if (success) {
+      console.log('Bootstrap completed successfully');
+    } else {
+      console.error('Bootstrap failed');
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error('Bootstrap error:', err);
     process.exit(1);
   }
 }
 
-bootstrap().catch(error => {
-  console.error('Unhandled error during bootstrap:', error);
+bootstrap().catch(err => {
+  console.error('Fatal error:', err);
   process.exit(1);
 });

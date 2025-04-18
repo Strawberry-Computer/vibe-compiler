@@ -1,14 +1,11 @@
 #!/bin/bash
 set -ex
 
-# Check if vibec.js exists
-if [ ! -f "output/current/bin/vibec.js" ]; then
-  echo "Error: vibec.js not found in output/current/bin/"
+# Verify bin/vibec.js exists
+if [ ! -f "bin/vibec.js" ]; then
+  echo "bin/vibec.js does not exist"
   exit 1
 fi
 
-# Run the test suite
-node output/current/test.js
-
-# Exit with success
-exit 0
+# Run tests
+node test.js
