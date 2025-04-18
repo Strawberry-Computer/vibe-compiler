@@ -1,25 +1,30 @@
 # Add Basic Tests
 
-Generate and enhance a test script for vibec:
-
-- Create `test.sh` with:
+- Replace `test.sh` with:
   - Start with `#!/bin/bash` and `set -ex` for debugging.
   - Verify `bin/vibec.js` exists.
   - Run `node test.js` to execute TAP tests.
 
 - Create `test.js` to validate logging and real mode:
-  - Use `tape` to test:
-    - Logging:
-      - `log.info`, `log.warn`, `log.error`, `log.success` output ANSI colors
-      - `log.debug` outputs if `VIBEC_DEBUG=1`.
-      - Make sure `log.logger` is overridden to capture output for testing.
-    - Real Mode
-      - Start an `http` server on `localhost:3000`, mock POST `/chat/completions` to return 'File: test-file.js\n```js\nconsole.log("mock")\n```'
-      - run `main()` with args  --api-url=http://localhost:3000` --api-key=test-key --workdir=./test-workdir
-      - check `./test-workdir/output/current/test-file.js` exists.
-  - Use only Node builtins (`http`, `tape`), import `./bin/vibec.js`.
-  - Use async/await in `tape` tests. Don't use t.end(). 
-- Exit with 0 on success, 1 on failure.
+  - Logging:
+    - `log.info`, `log.warn`, `log.error`, `log.success` output ANSI colors
+    - `log.debug` outputs if `VIBEC_DEBUG=1`.
+    - Make sure `log.logger` is overridden to capture output for testing.
+  - Real Mode
+    - Need to cd to temp directory to avoid conflicts with either stacks/ or output/ for main project.
+    - Start an `http` server on `localhost:3000`, mock POST `/chat/completions` to return 'File: test-file.js\n```js\nconsole.log("mock")\n```'
+    - run `main()` with args --api-url=http://localhost:3000` --api-key=test-key --workdir=./test-workdir
+    - check `./test-workdir/output/current/test-file.js` exists.
+
+## coding-style:
+- Generate only the files which have corresponding Output: directive. 
+- Don't assume any other files besides Output: and Context: exist.
+- Use ES6+ syntax with async/await and import/export.
+- Don't use require() use import instead.
+
+- Use `tape` for testing. Don't use `jest` for anything.
+- Use async/await in `tape` tests. Don't use `t.end()`. 
+- Use `t.throws` to verify errors are thrown. There is no such thing as `t.rejects`.
 
 ## Context: bin/vibec.js, test.sh
 ## Output: test.sh

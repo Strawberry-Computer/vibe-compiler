@@ -6,6 +6,8 @@ Generate a Node.js script with the following content:
 - Include `console.log` statements to indicate progress and errors.
 - Export all functions explicitly
 - Don't use `process.exit` to handle errors inside of functions, throw exceptions instead.
+- Use ES6+ syntax with async/await and import/export.
+- Avoid dependencies on external libraries like `openai`: just use `fetch` to make HTTP requests.
 
 # Functions:
 
@@ -16,14 +18,13 @@ Generate a Node.js script with the following content:
   - `--dry-run`: Boolean flag to enable dry-run mode (default: `false`)
   - `--start`: Numeric value specifying the starting stage (default: `null`)
   - `--end`: Numeric value specifying the ending stage (default: `null`)
-  - `--no-overwrite`: Boolean flag to prevent overwriting files (default: `false`)
   - `--api-url`: URL of the LLM API to query (default: 'https://openrouter.ai/api/v1')
   - `--api-key`: API key for LLM API authentication
   - `--api-model`: API model to use for LLM queries (default: 'anthropic/claude-3.7-sonnet')
   - `--test-cmd`: Command to execute tests after processing (default: `null`)
   - it should take `process.argv` as an argument and return an object with the parsed options
   - support both --option=value and --option value syntax
-  - for boolean flags, it should be true if the flag is present, false otherwise or if false is explicitly set, e.g. `--no-overwrite=false` or `--no-overwrite false`
+  - for boolean flags, it should be true if the flag is present, false otherwise or if false is explicitly set, e.g. `--dry-run=false` or `--dry-run false`
 
 ## getPromptFiles
 - Scan `stacks/<stack>` for `###_*.md` files from an array of stacks.
@@ -35,6 +36,12 @@ Generate a Node.js script with the following content:
 
 ## buildPrompt
 - read a file and append context from output/current/ using ## Context: file1, file2 syntax
+- assemble prompt sandwich with:
+  - system message
+  - user message
+  - context
+  - system message
+  - user message
 
 ## processLlm
   - Send the prompt to the LLM API at `${apiUrl}/chat/completions`. Do not use `new URL` to combine the URL.
@@ -59,11 +66,11 @@ Generate a Node.js script with the following content:
   - Build prompts for each file using `buildPrompt`.
   - Process prompts using `processLlm` to generate responses.
   - Parse responses using `parseResponse` to extract file content.
-  - Check for overwrites using `checkOverwrite` if `--no-overwrite` is set.
   - Before running any stage, reconstruct the `output/current/` directory:
     - initialize with `output/bootstrap/` files
-    - copy generated files from the `output/stacks/` directory to match given `--start`
+    - copy generated files from the `output/stacks/` directory to match given `--start`. 
     - copy even stacks that are not in the `--stacks` argument
+    - don't assume any directories exist, create them if needed
   - Write files to `output/stacks/<stack>/<prompt-file-name-without-md>/` and `output/current/` using `writeFiles`.
   - Run tests using `runTests` if a `--testCmd` is provided.
   - Exit with an error code if any step fails.

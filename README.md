@@ -96,7 +96,6 @@ npx vibec --stacks=core,tests --test-cmd="npm test" --retries=2 --plugin-timeout
 
 CLI options:
 - `--stacks=<stack1,stack2,...>`: Stacks to process (default: `core`)
-- `--no-overwrite`: Prevent overwriting files (default: `false`)
 - `--dry-run`: Simulate without modifications (default: `false`)
 - `--api-url=<url>`: LLM API endpoint (default: `https://api.anthropic.com/v1`)
 - `--api-model=<model>`: LLM model (default: `claude-3-7-sonnet`)
