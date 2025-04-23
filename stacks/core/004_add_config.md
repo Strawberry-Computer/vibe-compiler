@@ -11,21 +11,20 @@ Add `vibec.json` loading to vibec.js, merging with existing CLI and env vars (pr
 ## Config Options (vibec.json)
 - `workdir`: String, working directory. Default: `.`.
 - `stacks`: Array of stacks (e.g., `["core", "tests"]`). Default: `["core"]`.
-- `noOverwrite`: Boolean, no overwrites. Default: `false`.
 - `dryRun`: Boolean, simulate only. Default: `false`.
 - `start`: Numeric value specifying the starting stage. Default: `null`.
 - `end`: Numeric value specifying the ending stage. Default: `null`.
-- `apiUrl`: String, LLM API URL. Default: inherited from vibec.js.
-- `apiKey`: String, LLM API key. Default: inherited from vibec.js. Not recommended for config vs env var.
-- `apiModel`: String, LLM model. Default: inherited from vibec.js.
+- `apiUrl`: String, LLM API URL. Default: `https://openrouter.ai/api/v1`.
+- `apiKey`: String, LLM API key. Default: `null`. Not recommended for config vs env var.
+- `apiModel`: String, LLM model. Default: `anthropic/claude-3.7-sonnet`.
 - `testCmd`: String, test command. Default: `null`.
 - `retries`: Integer, retry count. Default: `0`.
 - `pluginTimeout`: Integer, plugin timeout in ms. Default: `5000`.
+- `output`: String, output directory. Default: `output`.
 
 ## Environment Variables
 - `VIBEC_WORKDIR`: Working directory path.
 - `VIBEC_STACKS`: Comma-separated stacks (e.g., `core,tests`).
-- `VIBEC_NO_OVERWRITE`: `true`/`false`.
 - `VIBEC_DRY_RUN`: `true`/`false`.
 - `VIBEC_START`: Numeric stage value.
 - `VIBEC_END`: Numeric stage value.
@@ -35,6 +34,7 @@ Add `vibec.json` loading to vibec.js, merging with existing CLI and env vars (pr
 - `VIBEC_TEST_CMD`: Command string.
 - `VIBEC_RETRIES`: Integer string (e.g., `2`).
 - `VIBEC_PLUGIN_TIMEOUT`: Integer string (e.g., `5000`).
+- `VIBEC_OUTPUT`: Output directory string.
 
 ## Example vibec.json
 ```json
@@ -43,8 +43,9 @@ Add `vibec.json` loading to vibec.js, merging with existing CLI and env vars (pr
   "testCmd": "npm test",
   "retries": 2,
   "pluginTimeout": 5000,
-  "apiUrl": "https://api.openai.com/v1",
-  "apiModel": "gpt-4"
+  "apiUrl": "https://openrouter.ai/api/v1",
+  "apiModel": "anthropic/claude-3.7-sonnet",
+  "output": "output"
 }
 
 
