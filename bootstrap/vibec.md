@@ -71,7 +71,7 @@ Generate a Node.js script with the following content:
     - copy generated files from the `output/stacks/` directory to match given `--start`. 
     - copy even stacks that are not in the `--stacks` argument
     - don't assume any directories exist, create them if needed
-  - Write files to `output/stacks/<stack>/<prompt-file-name-without-md>/` and `output/current/` using `writeFiles`.
+  - Write files to `output/stacks/<stack>/<prompt-file-name-without-md>/` and `output/current/` using `writeFiles` unless `--dry-run` is set.
   - Run tests using `runTests` if a `--testCmd` is provided.
   - Exit with an error code if any step fails.
 - Wrap `main` in a `.catch` block to handle errors gracefully.

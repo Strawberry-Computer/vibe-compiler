@@ -8,7 +8,6 @@ Add tests for expanded CLI support in `bin/vibec.js`:
     - `--api-model=<model>`: Verify parsed value (e.g., `claude-3.7-sonnet`).
     - `--test-cmd=<cmd>`: Verify parsed value (e.g., `npm test`).
     - `--retries=<number>`: Verify non-negative integer (e.g., `2`).
-    - `--plugin-timeout=<ms>`: Verify positive integer (e.g., `6000`).
     - `--output=<dir>`: Verify parsed value (e.g., `custom_output`).
     - Env Var Merge: Set `VIBEC_API_URL`, verify CLI `--api-url` overrides it.
     - NOTE: `parseArgs` throws when any error occurs. If you need to test anything else - you should be calling `main`.

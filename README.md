@@ -52,6 +52,8 @@ vibec/
 │           ├── 001_basic_tests/
 │           │   ├── test.js
 │           │   └── test.sh
+│           ├── 002_feature_tests/
+│           │   └── test.js
 │           ├── 003_cli_tests/
 │           │   └── test.js
 │           └── 004_config_tests/
@@ -91,17 +93,19 @@ export VIBEC_API_KEY=your_api_key_here
 
 Run with custom options:
 ```bash
-npx vibec --stacks=core,tests --test-cmd="npm test" --retries=2 --plugin-timeout=5000 --output=output
+npx vibec --stacks=core,tests --test-cmd="npm test" --retries=2  --output=output
 ```
 
 CLI options:
+- `--workdir=<dir>`: Working directory (default: `.`)
 - `--stacks=<stack1,stack2,...>`: Stacks to process (default: `core`)
 - `--dry-run`: Simulate without modifications (default: `false`)
-- `--api-url=<url>`: LLM API endpoint (default: `https://api.anthropic.com/v1`)
-- `--api-model=<model>`: LLM model (default: `claude-3-7-sonnet`)
+- `--start=<number>`: Start with specific stage number (default: none)
+- `--end=<number>`: End with specific stage number (default: none)
+- `--api-url=<url>`: LLM API endpoint (default: `https://openrouter.ai/api/v1`)
+- `--api-model=<model>`: LLM model (default: `anthropic/claude-3.7-sonnet`)
 - `--test-cmd=<command>`: Test command to run (default: none)
 - `--retries=<number>`: Retry attempts (≥ 0, default: `0`)
-- `--plugin-timeout=<ms>`: JS plugin timeout in ms (> 0, default: `5000`)
 - `--output=<dir>`: Output directory (default: `output`)
 - `--help`: Display usage information
 - `--version`: Show version (e.g., `vibec v1.0.0`)
@@ -111,12 +115,17 @@ CLI options:
 Configure via `vibec.json`:
 ```json
 {
+  "workdir": ".",
   "stacks": ["core", "tests"],
+  "dryRun": false,
+  "start": null,
+  "end": null,
   "testCmd": "npm test",
   "retries": 2,
   "pluginTimeout": 5000,
-  "apiUrl": "https://api.openai.com/v1",
-  "apiModel": "gpt-4"
+  "apiUrl": "https://openrouter.ai/api/v1",
+  "apiModel": "anthropic/claude-3.7-sonnet",
+  "output": "output"
 }
 ```
 
@@ -128,7 +137,12 @@ Validation:
 
 ### Environment Variables
 
+- `VIBEC_WORKDIR`: Working directory path.
 - `VIBEC_STACKS`: Comma-separated stacks (e.g., `core,tests`)
+- `VIBEC_DRY_RUN`: `true`/`false`.
+- `VIBEC_START`: Numeric stage value.
+- `VIBEC_END`: Numeric stage value.
+- `VIBEC_OUTPUT`: Output directory.
 - `VIBEC_TEST_CMD`: Test command
 - `VIBEC_RETRIES`: Retry count
 - `VIBEC_PLUGIN_TIMEOUT`: Plugin timeout (ms)
