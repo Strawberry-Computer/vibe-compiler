@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 
-const path = require('path');
-const fs = require('fs');
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 
 try {
+    // Get current file directory
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
     // Resolve the path to vibec.js relative to this script
     const vibecJs = path.resolve(__dirname, '..', 'output', 'current', 'bin', 'vibec.js');
 
@@ -17,9 +21,8 @@ try {
     console.log(`Using vibec.js from: ${vibecJs}`);
 
     // Import and run the main program
-    const vibec = require(vibecJs);
-    vibec.main(process.argv);
-
+    const { main } = await import(vibecJs);
+    main(process.argv);
 } catch (error) {
     console.error('Error launching vibec:', error.message);
     process.exit(1);
