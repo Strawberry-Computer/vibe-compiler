@@ -4,7 +4,9 @@ Enhance CLI parsing in `vibec.js` with additional options.
 
 ### New CLI Options
 - `--help`: Show usage and exit. 
-- `--version`: Show `vibec vX.Y.Z` and exit. Take version from `package.json`.
+- `--version`: Show `vibec vX.Y.Z` and exit.
+    - Take version from `package.json`
+    - Locate `package.json` relative to module root. `vibec.js` is located in `output/current/bin`, so we need to go up 3 levels to find `package.json`.
 - `--retries=<number>`: Retry count, non-negative integer. Default: `0`.
 - `--output=<dir>`: Output directory (e.g., `custom_output`). Default: `output`.
 
