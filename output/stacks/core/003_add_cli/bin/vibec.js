@@ -11,83 +11,77 @@ import { execSync } from 'child_process';
 export const log = {
   // Default logger
   logger: console.log,
-  
+
   // Color codes
   colors: {
     reset: '\x1b[0m',
+    cyan: '\x1b[36m',
+    yellow: '\x1b[33m',
     red: '\x1b[31m',
     green: '\x1b[32m',
-    yellow: '\x1b[33m',
-    cyan: '\x1b[36m',
     magenta: '\x1b[35m'
   },
 
-  // Log methods
-  info: function(message) {
-    this.logger(`${this.colors.cyan}${message}${this.colors.reset}`);
+  info: function(message, ...args) {
+    this.logger(`${this.colors.cyan}${message}${this.colors.reset}`, ...args);
   },
-  
-  warn: function(message) {
-    this.logger(`${this.colors.yellow}${message}${this.colors.reset}`);
+
+  warn: function(message, ...args) {
+    this.logger(`${this.colors.yellow}${message}${this.colors.reset}`, ...args);
   },
-  
-  error: function(message) {
-    this.logger(`${this.colors.red}${message}${this.colors.reset}`);
+
+  error: function(message, ...args) {
+    this.logger(`${this.colors.red}${message}${this.colors.reset}`, ...args);
   },
-  
-  success: function(message) {
-    this.logger(`${this.colors.green}${message}${this.colors.reset}`);
+
+  success: function(message, ...args) {
+    this.logger(`${this.colors.green}${message}${this.colors.reset}`, ...args);
   },
-  
-  debug: function(message) {
+
+  debug: function(message, ...args) {
     if (process.env.VIBEC_DEBUG) {
-      this.logger(`${this.colors.magenta}${message}${this.colors.reset}`);
+      this.logger(`${this.colors.magenta}${message}${this.colors.reset}`, ...args);
     }
   }
 };
 
-// Version information for --version option
-const VERSION = '1.0.0';
-
-// Help text for --help option
-const HELP_TEXT = `
+/**
+ * Show usage information
+ */
+export function showUsage() {
+  console.log(`
 Usage: vibec [options]
 
 Options:
-  --workdir=<dir>         Working directory (default: '.')
-  --stacks=<stack1,stack2> Comma-separated list of stacks (default: 'core')
-  --dry-run               Skip LLM API calls (default: false)
-  --start=<number>        Start at specific prompt number
-  --end=<number>          End at specific prompt number
-  --api-url=<url>         API URL (default: 'https://openrouter.ai/api/v1')
-  --api-key=<key>         API key (required for LLM API calls)
-  --api-model=<model>     API model (default: 'anthropic/claude-3.7-sonnet')
-  --test-cmd=<command>    Test command to run after processing
-  --help                  Show this help message and exit
-  --version               Show version information and exit
-  --retries=<number>      Number of retries for failed API calls (default: 0)
-  --plugin-timeout=<ms>   JS plugin timeout in milliseconds (default: 5000)
-  --output=<dir>          Output directory (default: 'output')
-`;
+  --help                Show this help message and exit
+  --version             Show version information and exit
+  --workdir=<dir>       Working directory (default: current directory)
+  --stacks=<names>      Comma-separated list of stacks to process (default: core)
+  --dry-run             Run without making changes (default: false)
+  --start=<number>      Start from prompt number (default: None)
+  --end=<number>        End at prompt number (default: None)
+  --api-url=<url>       API URL for LLM (default: https://openrouter.ai/api/v1)
+  --api-key=<key>       API Key for LLM
+  --api-model=<model>   Model to use (default: anthropic/claude-3.7-sonnet)
+  --test-cmd=<command>  Test command to run after processing
+  --retries=<number>    Number of retry attempts (default: 0)
+  --output=<dir>        Output directory (default: output)
+`);
+}
+
+/**
+ * Show version information
+ */
+export function showVersion() {
+  console.log('vibec v0.1.0'); // Replace with actual version
+}
 
 /**
  * Parse command line arguments
  * @param {string[]} argv - Command line arguments
- * @return {Object} Parsed options
+ * @returns {Object} Parsed options
  */
 export function parseArgs(argv) {
-  const args = argv.slice(2); // Remove node and script name
-
-  // Show help if requested
-  if (args.includes('--help')) {
-    return { help: true };
-  }
-  
-  // Show version if requested
-  if (args.includes('--version')) {
-    return { version: true };
-  }
-  
   const options = {
     workdir: '.',
     stacks: ['core'],
@@ -99,218 +93,233 @@ export function parseArgs(argv) {
     'api-model': 'anthropic/claude-3.7-sonnet',
     'test-cmd': null,
     retries: 0,
-    'plugin-timeout': 5000,
     output: 'output'
   };
 
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg.startsWith('--')) {
-      // Handle --option=value syntax
-      if (arg.includes('=')) {
-        const [key, value] = arg.slice(2).split('=');
+  // Check for help or version flags first
+  if (argv.includes('--help') || argv.includes('-h')) {
+    return { help: true };
+  }
+  
+  if (argv.includes('--version') || argv.includes('-v')) {
+    return { version: true };
+  }
+
+  for (let i = 2; i < argv.length; i++) {
+    const arg = argv[i];
+    
+    // Handle --option=value syntax
+    if (arg.startsWith('--') && arg.includes('=')) {
+      const [key, value] = arg.slice(2).split('=');
+      
+      if (key === 'stacks') {
+        options[key] = value.split(',');
+      } else if (key === 'dry-run') {
+        options[key] = value.toLowerCase() !== 'false';
+      } else if (key === 'start' || key === 'end') {
+        options[key] = value ? parseInt(value, 10) : null;
+      } else if (key === 'retries') {
+        const retries = parseInt(value, 10);
+        if (isNaN(retries) || retries < 0) {
+          throw new Error(`Invalid value for --${key}: must be a non-negative integer`);
+        }
+        options[key] = retries;
+      } else {
+        options[key] = value;
+      }
+    }
+    // Handle --option value syntax
+    else if (arg.startsWith('--')) {
+      const key = arg.slice(2);
+      
+      if (key === 'dry-run') {
+        options[key] = true;
+        continue;
+      }
+      
+      // Check if there's a next argument and it doesn't start with --
+      if (i + 1 < argv.length && !argv[i + 1].startsWith('--')) {
+        const value = argv[i + 1];
+        i++; // Skip the next argument since we've consumed it
+        
         if (key === 'stacks') {
           options[key] = value.split(',');
-        } else if (key === 'dry-run') {
-          options[key] = value.toLowerCase() !== 'false';
-        } else if (key === 'start' || key === 'end' || key === 'retries' || key === 'plugin-timeout') {
-          const numValue = Number(value);
-          if (isNaN(numValue)) {
-            throw new Error(`Invalid number value for ${key}: ${value}`);
+        } else if (key === 'start' || key === 'end') {
+          options[key] = value ? parseInt(value, 10) : null;
+        } else if (key === 'retries') {
+          const retries = parseInt(value, 10);
+          if (isNaN(retries) || retries < 0) {
+            throw new Error(`Invalid value for --${key}: must be a non-negative integer`);
           }
-          
-          if ((key === 'retries' && numValue < 0) || (key === 'plugin-timeout' && numValue <= 0)) {
-            throw new Error(`Invalid value for ${key}: ${value}. Must be a ${key === 'retries' ? 'non-negative' : 'positive'} integer.`);
-          }
-          
-          options[key] = numValue;
+          options[key] = retries;
         } else {
           options[key] = value;
         }
-      } 
-      // Handle --option value syntax or boolean flag
-      else {
-        const key = arg.slice(2);
-        const nextArg = args[i + 1];
-        
-        if (!nextArg || nextArg.startsWith('--')) {
-          // It's a boolean flag
-          options[key] = true;
-        } else {
-          // It's a value
-          i++; // Skip the next arg since we're consuming it now
-          if (key === 'stacks') {
-            options[key] = nextArg.split(',');
-          } else if (key === 'dry-run') {
-            options[key] = nextArg.toLowerCase() !== 'false';
-          } else if (key === 'start' || key === 'end' || key === 'retries' || key === 'plugin-timeout') {
-            const numValue = Number(nextArg);
-            if (isNaN(numValue)) {
-              throw new Error(`Invalid number value for ${key}: ${nextArg}`);
-            }
-            
-            if ((key === 'retries' && numValue < 0) || (key === 'plugin-timeout' && numValue <= 0)) {
-              throw new Error(`Invalid value for ${key}: ${nextArg}. Must be a ${key === 'retries' ? 'non-negative' : 'positive'} integer.`);
-            }
-            
-            options[key] = numValue;
-          } else {
-            options[key] = nextArg;
-          }
-        }
+      } else {
+        // Flag without value
+        options[key] = true;
       }
     }
   }
-
+  
   return options;
 }
 
 /**
  * Get prompt files from stacks
  * @param {string} workdir - Working directory
- * @param {string[]} stacks - Stacks to scan
- * @return {Promise<Array<Object>>} Array of objects with stack, file, and number properties
+ * @param {string[]} stacks - Stack names to scan
+ * @returns {Promise<Array<{stack: string, file: string, number: number}>>} Prompt files
  */
 export async function getPromptFiles(workdir, stacks) {
-  const result = [];
-  
+  const results = [];
+
   for (const stack of stacks) {
     const stackDir = path.join(workdir, 'stacks', stack);
     try {
       const files = await fs.readdir(stackDir);
       
       for (const file of files) {
-        if (file.match(/^\d+_.*\.md$/)) {
-          const number = parseInt(file.split('_')[0], 10);
-          result.push({
+        const match = file.match(/^(\d+)_.*\.md$/);
+        if (match) {
+          results.push({
             stack,
             file: path.join(stackDir, file),
-            number,
+            number: parseInt(match[1], 10)
           });
         }
       }
-    } catch (err) {
-      log.error(`Error reading stack directory ${stackDir}: ${err.message}`);
-      throw err;
+    } catch (error) {
+      log.error(`Error reading stack directory ${stackDir}:`, error);
+      throw error;
     }
   }
-  
-  return result.sort((a, b) => a.number - b.number);
+
+  return results.sort((a, b) => a.number - b.number);
 }
 
 /**
  * Load plugins for a stack
  * @param {string} workdir - Working directory
  * @param {string} stack - Stack name
- * @param {number} timeout - Plugin execution timeout in ms
- * @return {Promise<string>} Combined plugin content
+ * @returns {Promise<string>} Concatenated plugin content
  */
-export async function loadPlugins(workdir, stack, timeout = 5000) {
+export async function loadPlugins(workdir, stack) {
   const pluginsDir = path.join(workdir, 'stacks', stack, 'plugins');
   let pluginContent = '';
   
   try {
-    const files = await fs.readdir(pluginsDir);
-    const mdFiles = files.filter(file => file.endsWith('.md')).sort();
+    // Check if plugins directory exists
+    try {
+      await fs.access(pluginsDir);
+    } catch {
+      // No plugins directory, return empty string
+      return '';
+    }
     
-    if (mdFiles.length > 0) {
-      for (const file of mdFiles) {
-        const content = await fs.readFile(path.join(pluginsDir, file), 'utf-8');
-        pluginContent += `\n\n${content}`;
-        log.info(`Loaded plugin: ${stack}/plugins/${file}`);
+    // Get all .md files in the plugins directory
+    const files = await fs.readdir(pluginsDir);
+    const pluginFiles = files
+      .filter(file => file.endsWith('.md'))
+      .sort(); // Sort alphabetically
+    
+    if (pluginFiles.length === 0) {
+      return '';
+    }
+    
+    // Load each plugin and append content
+    for (const file of pluginFiles) {
+      const filePath = path.join(pluginsDir, file);
+      const content = await fs.readFile(filePath, 'utf8');
+      pluginContent += `\n\n${content}`;
+      log.info(`Loaded plugin: ${stack}/${file}`);
+    }
+    
+    return pluginContent;
+  } catch (error) {
+    log.warn(`Warning: Error loading plugins for stack ${stack}:`, error.message);
+    return '';
+  }
+}
+
+/**
+ * Build a prompt from a file and context
+ * @param {string} filePath - Path to prompt file
+ * @param {string} workdir - Working directory
+ * @param {string} outputDir - Output directory
+ * @returns {Promise<string>} Assembled prompt
+ */
+export async function buildPrompt(filePath, workdir, outputDir) {
+  const promptContent = await fs.readFile(filePath, 'utf8');
+  
+  // Extract context files
+  const contextMatch = promptContent.match(/## Context: (.+)/);
+  let contextContent = '';
+  
+  if (contextMatch) {
+    const contextFiles = contextMatch[1].split(',').map(f => f.trim());
+    
+    for (const file of contextFiles) {
+      try {
+        const currentFilePath = path.join(workdir, outputDir, 'current', file);
+        const fileContent = await fs.readFile(currentFilePath, 'utf8');
+        contextContent += `\nFile: ${file}\n\`\`\`\n${fileContent}\n\`\`\`\n`;
+      } catch (error) {
+        log.warn(`Warning: Could not read context file ${file}:`, error.message);
       }
     }
-  } catch (err) {
-    // Plugins directory may not exist, that's okay
-    log.debug(`No plugins found for stack ${stack}: ${err.message}`);
   }
   
-  return pluginContent;
-}
-
-/**
- * Build prompt from file and context
- * @param {string} filePath - Path to prompt file
- * @param {string} currentDir - Current directory containing context files
- * @param {string} workdir - Working directory
- * @param {string} stack - Stack name
- * @param {number} pluginTimeout - Plugin execution timeout in ms
- * @return {Promise<string>} Assembled prompt
- */
-export async function buildPrompt(filePath, currentDir, workdir, stack, pluginTimeout = 5000) {
-  try {
-    const fileContent = await fs.readFile(filePath, 'utf-8');
-    
-    // Extract context files
-    const contextMatch = fileContent.match(/## Context: (.*?)$/m);
-    let contextContent = '';
-    
-    if (contextMatch && contextMatch[1]) {
-      const contextFiles = contextMatch[1].split(',').map(f => f.trim());
-      
-      for (const file of contextFiles) {
-        try {
-          const contextFilePath = path.join(currentDir, file);
-          const content = await fs.readFile(contextFilePath, 'utf-8');
-          contextContent += `## File: ${file}\n\`\`\`\n${content}\n\`\`\`\n\n`;
-        } catch (err) {
-          log.warn(`Could not read context file ${file}: ${err.message}`);
-        }
-      }
-    }
-    
-    // Load plugins
-    const pluginContent = await loadPlugins(workdir, stack, pluginTimeout);
-    
-    // System message
-    const systemMessage = 'Generate code files in this exact format for each file: "File: path/to/file\n```lang\ncontent\n```". Ensure every response includes ALL files requested in the prompt\'s ## Output: sections. Do not skip any requested outputs.';
-    
-    // Assemble prompt sandwich
-    return `${systemMessage}\n\n${fileContent}${pluginContent}\n\n${contextContent}\n\n${systemMessage}\n\n${fileContent}${pluginContent}`;
-  } catch (err) {
-    log.error(`Error building prompt from ${filePath}: ${err.message}`);
-    throw err;
+  // Get the stack name from filePath
+  const stackMatch = filePath.match(/stacks\/([^/]+)\//);
+  let pluginContent = '';
+  if (stackMatch) {
+    const stack = stackMatch[1];
+    pluginContent = await loadPlugins(workdir, stack);
   }
+
+  // Assemble prompt sandwich
+  const systemMessage = 'Generate code files in this exact format for each file: "File: path/to/file\n```lang\ncontent\n```". Ensure every response includes ALL files requested in the prompt\'s ## Output: sections. Do not skip any requested outputs.';
+  
+  return `${systemMessage}\n\n${promptContent}${pluginContent}\n\n${contextContent}\n\n${systemMessage}\n\n${promptContent}${pluginContent}`;
 }
 
 /**
- * Process prompt with LLM API
- * @param {string} prompt - The prompt to send to the LLM API
- * @param {Object} options - Options including dry-run, api-url, api-key, api-model, retries
- * @return {Promise<string>} LLM API response
+ * Process a prompt through the LLM API
+ * @param {string} prompt - Prompt to send to LLM
+ * @param {Object} options - Options for LLM API
+ * @returns {Promise<string>} LLM response
  */
 export async function processLlm(prompt, options) {
   if (options['dry-run']) {
-    log.warn('Dry run mode: Skipping LLM API call');
-    log.info('Prompt:' + prompt);
+    log.info('--- DRY RUN MODE ---');
+    log.info('Prompt:', prompt);
     return 'File: example/file\n```lang\ncontent\n```';
   }
-  
+
   if (!options['api-key']) {
-    throw new Error('API key is required for LLM API calls');
+    throw new Error('API key is required for LLM processing');
   }
-  
+
   const apiUrl = options['api-url'];
   const apiKey = options['api-key'];
   const model = options['api-model'];
-  const maxRetries = options['retries'] || 0;
-
-  log.info(`Sending prompt to LLM API (${model})...`);
+  const maxRetries = options.retries;
   
-  let retries = 0;
+  log.info(`Sending request to ${apiUrl} with model ${model}`);
+  
   let lastError = null;
-
-  while (retries <= maxRetries) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      log.info(`Retry attempt ${attempt}/${maxRetries}...`);
+    }
+    
     try {
-      if (retries > 0) {
-        log.info(`Retry ${retries}/${maxRetries}...`);
-      }
-
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
           model: model,
@@ -328,37 +337,37 @@ export async function processLlm(prompt, options) {
       });
 
       if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(`LLM API error: ${response.status} - ${errorData}`);
+        const errorText = await response.text();
+        throw new Error(`API request failed with status ${response.status}: ${errorText}`);
       }
 
       const data = await response.json();
       return data.choices[0].message.content;
-    } catch (err) {
-      lastError = err;
-      retries++;
+    } catch (error) {
+      log.error(`Error processing LLM request (attempt ${attempt + 1}/${maxRetries + 1}):`, error);
+      lastError = error;
       
-      if (retries <= maxRetries) {
-        log.warn(`Error in LLM request (will retry): ${err.message}`);
-      } else {
-        log.error(`Error processing LLM request: ${err.message}`);
-        throw lastError;
+      // Don't wait after the last attempt
+      if (attempt < maxRetries) {
+        // Simple exponential backoff
+        const waitTime = Math.min(1000 * Math.pow(2, attempt), 30000);
+        log.info(`Waiting ${waitTime}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
       }
     }
   }
-
-  // This should not be reached, but just in case
-  throw lastError || new Error('Unknown error in LLM processing');
+  
+  throw lastError || new Error('All retry attempts failed');
 }
 
 /**
  * Parse LLM response to extract files
- * @param {string} response - LLM API response
- * @return {Array<Object>} Array of objects with path and content
+ * @param {string} response - LLM response
+ * @returns {Array<{path: string, content: string}>} Extracted files
  */
 export function parseResponse(response) {
-  const fileRegex = /File: (.+?)\n```(?:\w+)?\n([\s\S]+?)\n```/g;
   const files = [];
+  const fileRegex = /File: (.+?)\n```(?:\w+)?\n([\s\S]+?)\n```/g;
   
   let match;
   while ((match = fileRegex.exec(response)) !== null) {
@@ -367,216 +376,261 @@ export function parseResponse(response) {
       content: match[2]
     });
   }
-  
+
   return files;
 }
 
 /**
- * Write files to output directory
- * @param {Array<Object>} files - Files to write
- * @param {string} stackDir - Stack output directory
- * @param {string} currentDir - Current output directory
- * @return {Promise<void>}
- */
-export async function writeFiles(files, stackDir, currentDir) {
-  for (const file of files) {
-    const stackFilePath = path.join(stackDir, file.path);
-    const currentFilePath = path.join(currentDir, file.path);
-    
-    // Ensure directories exist
-    await fs.mkdir(path.dirname(stackFilePath), { recursive: true });
-    await fs.mkdir(path.dirname(currentFilePath), { recursive: true });
-    
-    // Write files
-    await fs.writeFile(stackFilePath, file.content);
-    await fs.writeFile(currentFilePath, file.content);
-    
-    log.success(`Wrote file: ${file.path}`);
-  }
-}
-
-/**
- * Run tests
+ * Run tests with the provided command
  * @param {string} testCmd - Test command to run
- * @return {void}
+ * @returns {Promise<void>}
  */
-export function runTests(testCmd) {
+export async function runTests(testCmd) {
   if (!testCmd) return;
   
+  log.info(`Running tests: ${testCmd}`);
   try {
-    log.info(`Running tests: ${testCmd}`);
-    execSync(testCmd, { stdio: 'inherit' });
-  } catch (err) {
-    log.error(`Error running tests: ${err.message}`);
-    throw err;
+    const output = execSync(testCmd, { stdio: 'inherit' });
+    log.success('Tests completed successfully');
+    return output;
+  } catch (error) {
+    log.error('Tests failed:', error);
+    throw error;
   }
 }
 
 /**
- * Main function to orchestrate the process
+ * Write files to output directories
+ * @param {Array<{path: string, content: string}>} files - Files to write
+ * @param {string} workdir - Working directory
+ * @param {string} stack - Stack name
+ * @param {number} promptNumber - Prompt number
+ * @param {string} promptFile - Prompt file name
+ * @param {string} outputDir - Output directory
+ * @returns {Promise<void>}
+ */
+export async function writeFiles(files, workdir, stack, promptNumber, promptFile, outputDir) {
+  const promptName = path.basename(promptFile, '.md');
+  const stackOutputDir = path.join(workdir, outputDir, 'stacks', stack, promptName);
+  
+  // Ensure directories exist
+  await fs.mkdir(stackOutputDir, { recursive: true });
+  
+  for (const file of files) {
+    const filePath = file.path;
+    const content = file.content;
+    
+    // Write to stack-specific output directory
+    const stackFilePath = path.join(stackOutputDir, filePath);
+    await fs.mkdir(path.dirname(stackFilePath), { recursive: true });
+    await fs.writeFile(stackFilePath, content);
+    
+    // Write to current directory
+    const currentFilePath = path.join(workdir, outputDir, 'current', filePath);
+    await fs.mkdir(path.dirname(currentFilePath), { recursive: true });
+    await fs.writeFile(currentFilePath, content);
+    
+    log.success(`Wrote file: ${filePath}`);
+  }
+}
+
+/**
+ * Initialize the output/current directory with bootstrap files
+ * @param {string} workdir - Working directory
+ * @param {string} outputDir - Output directory
+ * @returns {Promise<void>}
+ */
+export async function initializeOutputCurrent(workdir, outputDir) {
+  const bootstrapDir = path.join(workdir, outputDir, 'bootstrap');
+  const currentDir = path.join(workdir, outputDir, 'current');
+  
+  // Create current directory if it doesn't exist
+  await fs.mkdir(currentDir, { recursive: true });
+  
+  try {
+    // Clear current directory
+    const currentFiles = await fs.readdir(currentDir, { recursive: true });
+    for (const file of currentFiles) {
+      const filePath = path.join(currentDir, file);
+      const stat = await fs.stat(filePath);
+      if (stat.isFile()) {
+        await fs.unlink(filePath);
+      }
+    }
+    
+    // Copy bootstrap files to current directory
+    await copyDirectory(bootstrapDir, currentDir);
+    log.success(`Initialized ${outputDir}/current with bootstrap files`);
+  } catch (error) {
+    log.error(`Error initializing ${outputDir}/current:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Copy files from one directory to another
+ * @param {string} sourceDir - Source directory
+ * @param {string} targetDir - Target directory
+ * @returns {Promise<void>}
+ */
+export async function copyDirectory(sourceDir, targetDir) {
+  try {
+    // Check if source directory exists
+    try {
+      await fs.access(sourceDir);
+    } catch {
+      log.info(`Source directory ${sourceDir} does not exist, skipping copy operation.`);
+      return;
+    }
+    
+    // Create target directory if it doesn't exist
+    await fs.mkdir(targetDir, { recursive: true });
+    
+    // Read all files and directories from source
+    const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      const sourcePath = path.join(sourceDir, entry.name);
+      const targetPath = path.join(targetDir, entry.name);
+      
+      if (entry.isDirectory()) {
+        // Recursive copy for directories
+        await copyDirectory(sourcePath, targetPath);
+      } else {
+        // Copy file
+        await fs.copyFile(sourcePath, targetPath);
+      }
+    }
+  } catch (error) {
+    log.error(`Error copying directory from ${sourceDir} to ${targetDir}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Copy generated files from stacks to output/current up to a specific stage
+ * @param {string} workdir - Working directory
+ * @param {number} startStage - Stage to start from
+ * @param {string} outputDir - Output directory
+ * @returns {Promise<void>}
+ */
+export async function copyGeneratedFiles(workdir, startStage, outputDir) {
+  if (!startStage) return;
+
+  try {
+    const stacksDir = path.join(workdir, outputDir, 'stacks');
+    const stacks = await fs.readdir(stacksDir);
+
+    for (const stack of stacks) {
+      const stackDir = path.join(stacksDir, stack);
+      const stackStat = await fs.stat(stackDir);
+      
+      if (!stackStat.isDirectory()) continue;
+      
+      const promptDirs = await fs.readdir(stackDir);
+      
+      for (const promptDir of promptDirs) {
+        const match = promptDir.match(/^(\d+)_/);
+        if (match) {
+          const promptNumber = parseInt(match[1], 10);
+          
+          if (promptNumber < startStage) {
+            const sourceDir = path.join(stackDir, promptDir);
+            const currentDir = path.join(workdir, outputDir, 'current');
+            
+            await copyDirectory(sourceDir, currentDir);
+            log.info(`Copied files from ${sourceDir} to ${outputDir}/current`);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    log.error('Error copying generated files:', error);
+    throw error;
+  }
+}
+
+/**
+ * Main function
  * @param {string[]} argv - Command line arguments
- * @return {Promise<void>}
+ * @returns {Promise<void>}
  */
 export async function main(argv) {
   try {
-    // Parse CLI arguments
+    // Parse arguments
     const options = parseArgs(argv);
     
-    // Handle help
+    // Handle special flags
     if (options.help) {
-      console.log(HELP_TEXT);
+      showUsage();
       return;
     }
     
-    // Handle version
     if (options.version) {
-      console.log(`vibec v${VERSION}`);
+      showVersion();
       return;
     }
     
-    log.info(`Options: ${JSON.stringify(options, null, 2)}`);
+    log.info('Running with options:', JSON.stringify(options, null, 2));
     
-    // Get prompt files
-    const files = await getPromptFiles(options.workdir, options.stacks);
-    log.info(`Found ${files.length} prompt files`);
+    const outputDir = options.output;
     
-    // Filter files based on start and end
-    let filteredFiles = files;
-    if (options.start !== null) {
-      filteredFiles = filteredFiles.filter(file => file.number >= options.start);
-    }
-    if (options.end !== null) {
-      filteredFiles = filteredFiles.filter(file => file.number <= options.end);
-    }
-    log.info(`Processing ${filteredFiles.length} files after filtering`);
+    // Get prompt files within the specified range
+    const promptFiles = await getPromptFiles(options.workdir, options.stacks);
+    log.info(`Found ${promptFiles.length} prompt files across ${options.stacks.length} stacks`);
     
-    // Set output directory from options
-    const outputBase = path.join(options.workdir, options.output);
-    const currentDir = path.join(outputBase, 'current');
-    const bootstrapDir = path.join(outputBase, 'bootstrap');
+    // Filter prompt files based on start and end values
+    const filteredPromptFiles = promptFiles.filter(file => {
+      if (options.start !== null && file.number < options.start) return false;
+      if (options.end !== null && file.number > options.end) return false;
+      return true;
+    });
     
-    // Recreate the output/current directory
-    try {
-      await fs.rm(currentDir, { recursive: true, force: true });
-    } catch (err) {
-      // Ignore if directory doesn't exist
-    }
-    await fs.mkdir(currentDir, { recursive: true });
+    log.info(`Will process ${filteredPromptFiles.length} prompt files`);
     
-    // Copy bootstrap files if they exist
-    try {
-      const bootstrapFiles = await fs.readdir(bootstrapDir);
-      for (const file of bootstrapFiles) {
-        const srcPath = path.join(bootstrapDir, file);
-        const destPath = path.join(currentDir, file);
-        
-        const stat = await fs.stat(srcPath);
-        if (stat.isDirectory()) {
-          await fs.cp(srcPath, destPath, { recursive: true });
-        } else {
-          await fs.copyFile(srcPath, destPath);
-        }
-      }
-      log.success('Copied bootstrap files to current directory');
-    } catch (err) {
-      log.warn(`No bootstrap directory found or error copying: ${err.message}`);
-    }
+    // Initialize output/current directory
+    await initializeOutputCurrent(options.workdir, outputDir);
     
-    // Copy files from previous stacks if start is specified
-    if (options.start !== null) {
-      // Get all stacks
-      const stacksDir = path.join(options.workdir, 'stacks');
-      let allStacks;
-      try {
-        allStacks = await fs.readdir(stacksDir);
-      } catch (err) {
-        log.error(`Error reading stacks directory: ${err.message}`);
-        allStacks = [];
-      }
-      
-      // For each stack, get all prompt files less than start
-      for (const stack of allStacks) {
-        const stackPromptDir = path.join(stacksDir, stack);
-        try {
-          const stackFiles = await fs.readdir(stackPromptDir);
-          for (const file of stackFiles) {
-            if (file.match(/^\d+_.*\.md$/)) {
-              const number = parseInt(file.split('_')[0], 10);
-              if (number < options.start) {
-                const promptName = file.replace(/\.md$/, '');
-                const stackOutputDir = path.join(outputBase, 'stacks', stack, promptName);
-                
-                try {
-                  // Copy files from this stack output to current
-                  const outputFiles = await fs.readdir(stackOutputDir, { recursive: true });
-                  for (const outputFile of outputFiles) {
-                    const srcPath = path.join(stackOutputDir, outputFile);
-                    const destPath = path.join(currentDir, outputFile);
-                    
-                    const stat = await fs.stat(srcPath);
-                    if (stat.isDirectory()) {
-                      await fs.mkdir(destPath, { recursive: true });
-                    } else {
-                      await fs.mkdir(path.dirname(destPath), { recursive: true });
-                      await fs.copyFile(srcPath, destPath);
-                    }
-                  }
-                } catch (err) {
-                  // Skip if no files
-                }
-              }
-            }
-          }
-        } catch (err) {
-          // Skip if stack directory doesn't exist
-        }
-      }
-      log.success('Copied previous stack files to match starting point');
+    // Copy generated files if needed
+    if (options.start) {
+      await copyGeneratedFiles(options.workdir, options.start, outputDir);
     }
     
     // Process each prompt file
-    for (const promptFile of filteredFiles) {
-      log.info(`Processing ${promptFile.file} (${promptFile.number})`);
+    for (const promptFile of filteredPromptFiles) {
+      log.info(`Processing: ${promptFile.file} (${promptFile.number})`);
       
-      // Build prompt with plugins
-      const prompt = await buildPrompt(
-        promptFile.file, 
-        currentDir, 
-        options.workdir, 
-        promptFile.stack, 
-        options['plugin-timeout']
-      );
+      // Build prompt
+      const prompt = await buildPrompt(promptFile.file, options.workdir, outputDir);
       
       // Process with LLM
       const response = await processLlm(prompt, options);
       
       // Parse response
       const files = parseResponse(response);
-      log.info(`Extracted ${files.length} files from response`);
+      log.info(`Extracted ${files.length} files from LLM response`);
       
-      // Create output directories
-      const promptName = path.basename(promptFile.file, '.md');
-      const stackDir = path.join(outputBase, 'stacks', promptFile.stack, promptName);
-      await fs.mkdir(stackDir, { recursive: true });
-      
-      // Write files
-      await writeFiles(files, stackDir, currentDir);
-      
-      // Run tests
-      runTests(options['test-cmd']);
+      // Write files unless in dry-run mode
+      if (!options['dry-run']) {
+        await writeFiles(files, options.workdir, promptFile.stack, promptFile.number, path.basename(promptFile.file), outputDir);
+      } else {
+        log.info('Dry run mode - files not written');
+      }
     }
     
-    log.success('Processing complete');
-  } catch (err) {
-    log.error(`Error: ${err.message}`);
+    // Run tests if test command is provided
+    if (options['test-cmd']) {
+      await runTests(options['test-cmd']);
+    }
+    
+    log.success('Processing completed successfully');
+  } catch (error) {
+    log.error('Error in main execution:', error);
     process.exit(1);
   }
 }
 
-// Only execute main if script is run directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main(process.argv).catch(err => {
-    log.error(`Error: ${err.message}`);
-    process.exit(1);
-  });
+// Only run main if this file is executed directly
+if (process.argv[1] === import.meta.url.substring('file://'.length)) {
+  main(process.argv);
 }

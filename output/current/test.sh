@@ -3,7 +3,7 @@ set -ex
 
 # Verify bin/vibec.js exists
 if [ ! -f "bin/vibec.js" ]; then
-  echo "bin/vibec.js does not exist"
+  echo "Error: bin/vibec.js not found!"
   exit 1
 fi
 

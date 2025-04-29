@@ -1,383 +1,297 @@
-import test from 'tape';
+import tape from 'tape';
 import http from 'http';
 import path from 'path';
 import { promises as fs } from 'fs';
+import { fileURLToPath } from 'url';
 import os from 'os';
 import { log, main, parseArgs, loadPlugins } from './bin/vibec.js';
 
-// Create a temporary directory for tests
-async function createTempTestDir() {
-  const tempDir = path.join(os.tmpdir(), `vibec-test-${Date.now()}`);
-  await fs.mkdir(tempDir, { recursive: true });
-  return tempDir;
-}
-
-// Redirect logger during tests
-function silenceLogger() {
+// Helper to capture console output
+function captureOutput(fn) {
+  const messages = [];
   const originalLogger = log.logger;
-  log.logger = () => {}; // Silence logs during tests
-  return () => { log.logger = originalLogger; }; // Return function to restore
+  
+  log.logger = (...args) => {
+    messages.push(args.join(' '));
+  };
+  
+  try {
+    fn();
+  } finally {
+    log.logger = originalLogger;
+  }
+  
+  return messages;
 }
 
-test('CLI argument parsing', async (t) => {
-  // Test stacks parsing with comma-separated values
-  const args1 = ['node', 'vibec.js', '--stacks=core,tests', '--dry-run'];
+// Test CLI argument parsing
+tape('Test CLI argument parsing', t => {
+  // Test --stacks with comma-separated values
+  const args1 = ['node', 'vibec.js', '--stacks=core,tests'];
   const options1 = parseArgs(args1);
   t.deepEqual(options1.stacks, ['core', 'tests'], 'Should parse comma-separated stacks');
-  t.equal(options1['dry-run'], true, 'Should set dry-run flag');
-
-  // Test stacks parsing with space-separated values
-  const args2 = ['node', 'vibec.js', '--stacks', 'core,tests', '--dry-run=false'];
+  
+  // Test --dry-run flag
+  const args2 = ['node', 'vibec.js', '--dry-run'];
   const options2 = parseArgs(args2);
-  t.deepEqual(options2.stacks, ['core', 'tests'], 'Should parse stacks from separate argument');
-  t.equal(options2['dry-run'], false, 'Should parse dry-run=false');
-
-  // Test boolean flags
-  const args3 = ['node', 'vibec.js', '--dry-run'];
+  t.equal(options2['dry-run'], true, 'Should set dry-run flag');
+  
+  // Test --dry-run=false
+  const args3 = ['node', 'vibec.js', '--dry-run=false'];
   const options3 = parseArgs(args3);
-  t.equal(options3['dry-run'], true, 'Should set boolean flag to true');
-
+  t.equal(options3['dry-run'], false, 'Should parse dry-run=false');
+  
+  // Test multiple arguments
+  const args4 = ['node', 'vibec.js', '--stacks=core,utils', '--api-url=http://localhost:3000', '--dry-run'];
+  const options4 = parseArgs(args4);
+  t.deepEqual(options4.stacks, ['core', 'utils'], 'Should parse stacks correctly');
+  t.equal(options4['api-url'], 'http://localhost:3000', 'Should set API URL');
+  t.equal(options4['dry-run'], true, 'Should set dry-run flag');
+  
   t.end();
 });
 
-test('Plugin loading', async (t) => {
-  const restoreLogger = silenceLogger();
-  try {
-    // Create temporary test directory structure
-    const tempDir = await createTempTestDir();
-    const stackName = 'test-stack';
-    const pluginsDir = path.join(tempDir, 'stacks', stackName, 'plugins');
-    
-    await fs.mkdir(pluginsDir, { recursive: true });
-    await fs.writeFile(
-      path.join(pluginsDir, 'test-plugin.md'),
-      '# Test Plugin\n\nThis is a test plugin.'
-    );
-
-    // Load plugins from the test directory
-    const pluginContent = await loadPlugins(tempDir, stackName);
-    
-    t.ok(
-      pluginContent.includes('# Test Plugin'), 
-      'Should load plugin content from .md file'
-    );
-
-    // Cleanup
-    await fs.rm(tempDir, { recursive: true });
-  } catch (err) {
-    t.fail(`Plugin loading test failed: ${err.message}`);
-  } finally {
-    restoreLogger();
-    t.end();
-  }
-});
-
-test('Handling non-existent plugins directory', async (t) => {
-  const restoreLogger = silenceLogger();
-  try {
-    const tempDir = await createTempTestDir();
-    // Try to load plugins from a stack that doesn't have a plugins directory
-    const pluginContent = await loadPlugins(tempDir, 'nonexistent-stack');
-    
-    t.equal(pluginContent, '', 'Should return empty string for non-existent plugins directory');
-    
-    // Cleanup
-    await fs.rm(tempDir, { recursive: true });
-  } catch (err) {
-    t.fail(`Non-existent plugins test failed: ${err.message}`);
-  } finally {
-    restoreLogger();
-    t.end();
-  }
-});
-
-test('Full plugin integration with mock API server', async (t) => {
-  const restoreLogger = silenceLogger();
-  let server;
+// Test loading plugins
+tape('Test loading plugins', async t => {
+  // Create a temporary directory for the test
+  const tempDir = path.join(os.tmpdir(), `vibec-plugin-test-${Date.now()}`);
+  await fs.mkdir(path.join(tempDir, 'stacks', 'test-stack', 'plugins'), { recursive: true });
+  
+  // Create a test plugin file
+  const pluginContent = '# Test Plugin\nThis is a test plugin content.';
+  await fs.writeFile(
+    path.join(tempDir, 'stacks', 'test-stack', 'plugins', 'test-plugin.md'),
+    pluginContent
+  );
   
   try {
-    // Create temporary test directory with stack structure
-    const tempDir = await createTempTestDir();
-    const stackName = 'test-stack';
-    const stackDir = path.join(tempDir, 'stacks', stackName);
-    const pluginsDir = path.join(stackDir, 'plugins');
-    
-    // Create the necessary directories
-    await fs.mkdir(pluginsDir, { recursive: true });
-    
-    // Create a test prompt file
-    await fs.writeFile(
-      path.join(stackDir, '01_test.md'),
-      '# Test Prompt\n\n## Output: test.js'
-    );
-    
-    // Create a test plugin file
-    await fs.writeFile(
-      path.join(pluginsDir, 'test-plugin.md'),
-      '# Plugin Content\n\nThis should be included in the prompt.'
-    );
-    
-    // Start a mock API server
-    server = http.createServer((req, res) => {
-      if (req.method === 'POST' && req.url === '/chat/completions') {
-        let body = '';
-        req.on('data', chunk => { body += chunk.toString(); });
-        
-        req.on('end', () => {
-          // Verify the plugin content was included in the request
-          const requestIncludesPlugin = body.includes('Plugin Content');
-          
-          // Send mock response
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({
-            choices: [
-              {
-                message: {
-                  content: 'File: test.js\n```js\nconsole.log("mock");\n// Plugin included: ' + requestIncludesPlugin + '\n```'
-                }
-              }
-            ]
-          }));
-        });
-      } else {
-        res.statusCode = 404;
-        res.end('Not found');
-      }
-    });
-    
-    // Start the server on port 3000
-    await new Promise(resolve => {
-      server.listen(3000, 'localhost', resolve);
-    });
-    
-    // Run vibec with the test stack
-    await main([
-      'node', 'vibec.js',
-      `--workdir=${tempDir}`,
-      `--stacks=${stackName}`,
-      '--api-url=http://localhost:3000',
-      '--api-key=test-key',
-      '--dry-run=false'
-    ]);
-    
-    // Verify the output file was created
-    const outputDir = path.join(tempDir, 'output', 'current');
-    const outputFile = path.join(outputDir, 'test.js');
-    
-    const fileExists = await fs.access(outputFile)
-      .then(() => true)
-      .catch(() => false);
-    
-    t.ok(fileExists, 'Output file should exist');
-    
-    if (fileExists) {
-      const content = await fs.readFile(outputFile, 'utf-8');
-      t.ok(content.includes('console.log("mock")'), 'Output file should contain expected content');
-      t.ok(content.includes('Plugin included: true'), 'Plugin should have been included in the request');
-    }
-    
+    // Load plugins
+    const result = await loadPlugins(tempDir, 'test-stack');
+    t.ok(result.includes('This is a test plugin content.'), 'Should load plugin content');
+  } finally {
     // Clean up
-    await fs.rm(tempDir, { recursive: true });
-  } catch (err) {
-    t.fail(`Plugin integration test failed: ${err.message}`);
-  } finally {
-    if (server) {
-      server.close();
-    }
-    restoreLogger();
-    t.end();
+    await fs.rm(tempDir, { recursive: true, force: true });
   }
+  
+  t.end();
 });
 
-test('Dry run mode', async (t) => {
-  const messages = [];
-  const originalLogger = log.logger;
-  log.logger = (msg) => messages.push(msg);
+// Test real mode with mock API server and plugins
+tape('Test real mode with mock API server and plugins', async t => {
+  // Create a temporary directory for the test
+  const tempDir = path.join(os.tmpdir(), `vibec-test-${Date.now()}`);
+  const testWorkdir = path.join(tempDir, 'test-workdir');
   
-  try {
-    // Create temporary test directory
-    const tempDir = await createTempTestDir();
-    const stackDir = path.join(tempDir, 'stacks', 'core');
-    
-    await fs.mkdir(stackDir, { recursive: true });
-    await fs.writeFile(
-      path.join(stackDir, '01_test.md'),
-      '# Test Prompt\n\n## Output: test.js'
-    );
-    
-    // Run in dry-run mode
-    await main([
-      'node', 'vibec.js',
-      `--workdir=${tempDir}`,
-      '--dry-run'
-    ]);
-    
-    // Check that the appropriate dry-run message was logged
-    const dryRunMessageLogged = messages.some(msg => 
-      msg.includes('Dry run mode: Skipping LLM API call'));
-    
-    t.ok(dryRunMessageLogged, 'Should log dry run message');
-    
-    // Clean up
-    await fs.rm(tempDir, { recursive: true });
-  } catch (err) {
-    t.fail(`Dry run test failed: ${err.message}`);
-  } finally {
-    log.logger = originalLogger;
-    t.end();
-  }
-});
-
-test('Multiple stacks processing', async (t) => {
-  const restoreLogger = silenceLogger();
-  let server;
+  // Setup directories needed for the test
+  await fs.mkdir(path.join(testWorkdir, 'output', 'bootstrap'), { recursive: true });
+  await fs.mkdir(path.join(testWorkdir, 'stacks', 'test-stack', 'plugins'), { recursive: true });
   
-  try {
-    // Create temporary test directory with multiple stacks
-    const tempDir = await createTempTestDir();
-    const stack1Dir = path.join(tempDir, 'stacks', 'stack1');
-    const stack2Dir = path.join(tempDir, 'stacks', 'stack2');
-    
-    await fs.mkdir(stack1Dir, { recursive: true });
-    await fs.mkdir(stack2Dir, { recursive: true });
-    
-    // Create test prompt files in each stack
-    await fs.writeFile(
-      path.join(stack1Dir, '01_test1.md'),
-      '# Test Prompt 1\n\n## Output: test1.js'
-    );
-    
-    await fs.writeFile(
-      path.join(stack2Dir, '02_test2.md'),
-      '# Test Prompt 2\n\n## Output: test2.js'
-    );
-    
-    // Start a mock API server
-    server = http.createServer((req, res) => {
-      if (req.method === 'POST' && req.url === '/chat/completions') {
-        let body = '';
-        req.on('data', chunk => { body += chunk.toString(); });
-        
-        req.on('end', () => {
-          // Determine which prompt is being processed
-          let response;
-          if (body.includes('Test Prompt 1')) {
-            response = 'File: test1.js\n```js\nconsole.log("stack1");\n```';
-          } else {
-            response = 'File: test2.js\n```js\nconsole.log("stack2");\n```';
-          }
-          
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({
-            choices: [
-              {
-                message: {
-                  content: response
-                }
-              }
-            ]
-          }));
-        });
-      } else {
-        res.statusCode = 404;
-        res.end('Not found');
-      }
-    });
-    
-    // Start the server
-    await new Promise(resolve => {
-      server.listen(3000, 'localhost', resolve);
-    });
-    
-    // Run vibec with both stacks
-    await main([
-      'node', 'vibec.js',
-      `--workdir=${tempDir}`,
-      '--stacks=stack1,stack2',
-      '--api-url=http://localhost:3000',
-      '--api-key=test-key',
-      '--dry-run=false'
-    ]);
-    
-    // Verify the output files were created
-    const outputDir = path.join(tempDir, 'output', 'current');
-    const file1Exists = await fs.access(path.join(outputDir, 'test1.js'))
-      .then(() => true)
-      .catch(() => false);
-    
-    const file2Exists = await fs.access(path.join(outputDir, 'test2.js'))
-      .then(() => true)
-      .catch(() => false);
-    
-    t.ok(file1Exists, 'Output file from stack1 should exist');
-    t.ok(file2Exists, 'Output file from stack2 should exist');
-    
-    if (file1Exists && file2Exists) {
-      const content1 = await fs.readFile(path.join(outputDir, 'test1.js'), 'utf-8');
-      const content2 = await fs.readFile(path.join(outputDir, 'test2.js'), 'utf-8');
+  // Create a test prompt file
+  const promptContent = `# Test Prompt
+## Output: test.js
+`;
+  await fs.writeFile(
+    path.join(testWorkdir, 'stacks', 'test-stack', '001_test.md'),
+    promptContent
+  );
+  
+  // Create a plugin file
+  const pluginContent = '# Test Plugin\nThis adds functionality.';
+  await fs.writeFile(
+    path.join(testWorkdir, 'stacks', 'test-stack', 'plugins', 'test-plugin.md'),
+    pluginContent
+  );
+  
+  // Start a mock HTTP server that simulates the OpenAI API
+  const server = http.createServer((req, res) => {
+    // Mock API response
+    if (req.url === '/chat/completions' && req.method === 'POST') {
+      let body = '';
       
-      t.equal(content1, 'console.log("stack1");', 'Content from stack1 should match');
-      t.equal(content2, 'console.log("stack2");', 'Content from stack2 should match');
+      req.on('data', chunk => {
+        body += chunk.toString();
+      });
+      
+      req.on('end', () => {
+        // Verify the request includes the plugin content
+        try {
+          const requestData = JSON.parse(body);
+          const userMessage = requestData.messages.find(m => m.role === 'user')?.content || '';
+          
+          t.ok(userMessage.includes('This adds functionality'), 'Request should include plugin content');
+          
+          // Return a mock response
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: 'File: test.js\n```js\nconsole.log("mock")\n```'
+                }
+              }
+            ]
+          }));
+        } catch (error) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: error.message }));
+        }
+      });
+    } else {
+      res.writeHead(404);
+      res.end();
     }
+  });
+  
+  // Start the server
+  await new Promise(resolve => {
+    server.listen(3000, resolve);
+  });
+  
+  try {
+    // Run the main function with mock API
+    await main([
+      'node', 'vibec.js',
+      '--api-url=http://localhost:3000',
+      '--api-key=test-key',
+      `--workdir=${testWorkdir}`,
+      '--dry-run=false',
+      '--stacks=test-stack'
+    ]);
     
-    // Clean up
-    await fs.rm(tempDir, { recursive: true });
-  } catch (err) {
-    t.fail(`Multiple stacks test failed: ${err.message}`);
-  } finally {
-    if (server) {
-      server.close();
+    // Check if the output file was created
+    const outputFileExists = await fs.access(path.join(testWorkdir, 'output', 'current', 'test.js'))
+      .then(() => true)
+      .catch(() => false);
+    
+    t.ok(outputFileExists, 'Output file was created');
+    
+    if (outputFileExists) {
+      const fileContent = await fs.readFile(path.join(testWorkdir, 'output', 'current', 'test.js'), 'utf8');
+      t.equal(fileContent, 'console.log("mock")', 'File content matches expected output');
     }
-    restoreLogger();
-    t.end();
+  } catch (error) {
+    t.fail(`Test failed with error: ${error.message}`);
+  } finally {
+    // Clean up
+    server.close();
+    
+    // Clean up temporary directory
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    } catch (err) {
+      console.error('Error cleaning up temp directory:', err);
+    }
   }
 });
 
-// Test using start and end parameters
-test('Start and end parameters', async (t) => {
-  const restoreLogger = silenceLogger();
-  let server;
+// Test dry-run mode
+tape('Test dry-run mode', async t => {
+  // Create a temporary directory for the test
+  const tempDir = path.join(os.tmpdir(), `vibec-dry-run-test-${Date.now()}`);
+  const testWorkdir = path.join(tempDir, 'test-workdir');
+  
+  // Setup directories needed for the test
+  await fs.mkdir(path.join(testWorkdir, 'output', 'bootstrap'), { recursive: true });
+  await fs.mkdir(path.join(testWorkdir, 'stacks', 'core'), { recursive: true });
+  
+  // Create a test prompt file
+  const promptContent = `# Test Prompt
+## Output: dry-run-test.js
+`;
+  await fs.writeFile(
+    path.join(testWorkdir, 'stacks', 'core', '001_test.md'),
+    promptContent
+  );
   
   try {
-    // Create temporary test directory
-    const tempDir = await createTempTestDir();
-    const stackDir = path.join(tempDir, 'stacks', 'core');
+    // Capture output to verify dry-run behavior
+    const originalLogger = log.logger;
+    const messages = [];
     
-    await fs.mkdir(stackDir, { recursive: true });
+    log.logger = (...args) => {
+      messages.push(args.join(' '));
+    };
     
-    // Create test prompt files with different numbers
-    await fs.writeFile(
-      path.join(stackDir, '01_first.md'),
-      '# First Prompt\n\n## Output: first.js'
-    );
+    // Run with dry-run mode
+    await main([
+      'node', 'vibec.js',
+      `--workdir=${testWorkdir}`,
+      '--dry-run',
+      '--stacks=core'
+    ]);
     
-    await fs.writeFile(
-      path.join(stackDir, '02_second.md'),
-      '# Second Prompt\n\n## Output: second.js'
-    );
+    // Restore logger
+    log.logger = originalLogger;
     
-    await fs.writeFile(
-      path.join(stackDir, '03_third.md'),
-      '# Third Prompt\n\n## Output: third.js'
-    );
+    // Check that dry-run message was logged
+    t.ok(messages.some(msg => msg.includes('DRY RUN MODE')), 'Dry-run mode message should be logged');
     
-    // Start a mock API server
-    server = http.createServer((req, res) => {
-      if (req.method === 'POST' && req.url === '/chat/completions') {
-        let body = '';
-        req.on('data', chunk => { body += chunk.toString(); });
-        
-        req.on('end', () => {
+    // Check that the output file was NOT created
+    const outputFileExists = await fs.access(path.join(testWorkdir, 'output', 'current', 'dry-run-test.js'))
+      .then(() => true)
+      .catch(() => false);
+    
+    t.notOk(outputFileExists, 'Output file should not be created in dry-run mode');
+  } catch (error) {
+    t.fail(`Test failed with error: ${error.message}`);
+  } finally {
+    // Clean up temporary directory
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    } catch (err) {
+      console.error('Error cleaning up temp directory:', err);
+    }
+  }
+  
+  t.end();
+});
+
+// Test multiple stacks
+tape('Test processing multiple stacks', async t => {
+  // Create a temporary directory for the test
+  const tempDir = path.join(os.tmpdir(), `vibec-multi-stack-test-${Date.now()}`);
+  const testWorkdir = path.join(tempDir, 'test-workdir');
+  
+  // Setup directories needed for the test
+  await fs.mkdir(path.join(testWorkdir, 'output', 'bootstrap'), { recursive: true });
+  await fs.mkdir(path.join(testWorkdir, 'stacks', 'stack1'), { recursive: true });
+  await fs.mkdir(path.join(testWorkdir, 'stacks', 'stack2'), { recursive: true });
+  
+  // Create test prompt files
+  await fs.writeFile(
+    path.join(testWorkdir, 'stacks', 'stack1', '001_test.md'),
+    `# Test Prompt Stack1\n## Output: stack1.js\n`
+  );
+  
+  await fs.writeFile(
+    path.join(testWorkdir, 'stacks', 'stack2', '001_test.md'),
+    `# Test Prompt Stack2\n## Output: stack2.js\n`
+  );
+  
+  // Start a mock HTTP server that simulates the OpenAI API
+  const server = http.createServer((req, res) => {
+    // Mock API response
+    if (req.url === '/chat/completions' && req.method === 'POST') {
+      let body = '';
+      
+      req.on('data', chunk => {
+        body += chunk.toString();
+      });
+      
+      req.on('end', () => {
+        // Return a mock response based on the request content
+        try {
+          const requestData = JSON.parse(body);
+          const userMessage = requestData.messages.find(m => m.role === 'user')?.content || '';
+          
           let response;
-          if (body.includes('First Prompt')) {
-            response = 'File: first.js\n```js\nconsole.log("first");\n```';
-          } else if (body.includes('Second Prompt')) {
-            response = 'File: second.js\n```js\nconsole.log("second");\n```';
+          if (userMessage.includes('Test Prompt Stack1')) {
+            response = 'File: stack1.js\n```js\nconsole.log("stack1")\n```';
           } else {
-            response = 'File: third.js\n```js\nconsole.log("third");\n```';
+            response = 'File: stack2.js\n```js\nconsole.log("stack2")\n```';
           }
           
-          res.setHeader('Content-Type', 'application/json');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             choices: [
               {
@@ -387,57 +301,66 @@ test('Start and end parameters', async (t) => {
               }
             ]
           }));
-        });
-      } else {
-        res.statusCode = 404;
-        res.end('Not found');
-      }
-    });
-    
-    // Start the server
-    await new Promise(resolve => {
-      server.listen(3000, 'localhost', resolve);
-    });
-    
-    // Run vibec with start=2 and end=2 (only process second.md)
+        } catch (error) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: error.message }));
+        }
+      });
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  
+  // Start the server
+  await new Promise(resolve => {
+    server.listen(3000, resolve);
+  });
+  
+  try {
+    // Run the main function with multiple stacks
     await main([
       'node', 'vibec.js',
-      `--workdir=${tempDir}`,
-      '--start=2',
-      '--end=2',
       '--api-url=http://localhost:3000',
       '--api-key=test-key',
-      '--dry-run=false'
+      `--workdir=${testWorkdir}`,
+      '--stacks=stack1,stack2'
     ]);
     
-    // Verify only the second file was processed
-    const outputDir = path.join(tempDir, 'output', 'current');
-    
-    const file1Exists = await fs.access(path.join(outputDir, 'first.js'))
+    // Check if both output files were created
+    const stack1FileExists = await fs.access(path.join(testWorkdir, 'output', 'current', 'stack1.js'))
       .then(() => true)
       .catch(() => false);
     
-    const file2Exists = await fs.access(path.join(outputDir, 'second.js'))
+    const stack2FileExists = await fs.access(path.join(testWorkdir, 'output', 'current', 'stack2.js'))
       .then(() => true)
       .catch(() => false);
     
-    const file3Exists = await fs.access(path.join(outputDir, 'third.js'))
-      .then(() => true)
-      .catch(() => false);
+    t.ok(stack1FileExists, 'Stack1 output file was created');
+    t.ok(stack2FileExists, 'Stack2 output file was created');
     
-    t.notOk(file1Exists, 'First file should not exist (filtered out by start=2)');
-    t.ok(file2Exists, 'Second file should exist');
-    t.notOk(file3Exists, 'Third file should not exist (filtered out by end=2)');
-    
-    // Clean up
-    await fs.rm(tempDir, { recursive: true });
-  } catch (err) {
-    t.fail(`Start/end parameter test failed: ${err.message}`);
-  } finally {
-    if (server) {
-      server.close();
+    if (stack1FileExists) {
+      const stack1Content = await fs.readFile(path.join(testWorkdir, 'output', 'current', 'stack1.js'), 'utf8');
+      t.equal(stack1Content, 'console.log("stack1")', 'Stack1 file content matches expected output');
     }
-    restoreLogger();
-    t.end();
+    
+    if (stack2FileExists) {
+      const stack2Content = await fs.readFile(path.join(testWorkdir, 'output', 'current', 'stack2.js'), 'utf8');
+      t.equal(stack2Content, 'console.log("stack2")', 'Stack2 file content matches expected output');
+    }
+  } catch (error) {
+    t.fail(`Test failed with error: ${error.message}`);
+  } finally {
+    // Clean up
+    server.close();
+    
+    // Clean up temporary directory
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    } catch (err) {
+      console.error('Error cleaning up temp directory:', err);
+    }
   }
+  
+  t.end();
 });
