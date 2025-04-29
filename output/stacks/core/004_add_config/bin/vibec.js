@@ -4,6 +4,8 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import https from 'https';
 import { execSync } from 'child_process';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 
 /**
  * Colored logging utility
@@ -46,52 +48,62 @@ export const log = {
 };
 
 /**
- * Show usage information
+ * Display help message
  */
-export function showUsage() {
+export async function showHelp() {
   console.log(`
 Usage: vibec [options]
 
 Options:
-  --help                Show this help message and exit
-  --version             Show version information and exit
-  --workdir=<dir>       Working directory (default: current directory)
-  --stacks=<names>      Comma-separated list of stacks to process (default: core)
-  --dry-run             Run without making changes (default: false)
-  --start=<number>      Start from prompt number (default: None)
-  --end=<number>        End at prompt number (default: None)
-  --api-url=<url>       API URL for LLM (default: https://openrouter.ai/api/v1)
-  --api-key=<key>       API Key for LLM
-  --api-model=<model>   Model to use (default: anthropic/claude-3.7-sonnet)
-  --test-cmd=<command>  Test command to run after processing
-  --retries=<number>    Number of retry attempts (default: 0)
-  --plugin-timeout=<ms> Plugin timeout in ms (default: 5000)
-  --output=<dir>        Output directory (default: output)
+  --workdir=<dir>           Working directory (default: '.')
+  --stacks=<stack1,stack2>  Comma-separated list of stacks to process (default: 'core')
+  --dry-run                 Run without making any changes (default: false)
+  --start=<number>          Start at specific prompt number
+  --end=<number>            End at specific prompt number
+  --api-url=<url>           API URL (default: 'https://openrouter.ai/api/v1')
+  --api-key=<key>           API key (required)
+  --api-model=<model>       API model (default: 'anthropic/claude-3.7-sonnet')
+  --test-cmd=<command>      Command to run tests
+  --retries=<number>        Number of times to retry API calls (default: 0)
+  --plugin-timeout=<number> Timeout for plugins in milliseconds (default: 5000)
+  --output=<dir>            Output directory (default: 'output')
+  --help                    Show this help message
+  --version                 Show version information
 `);
 }
 
 /**
- * Show version information
+ * Display version information
  */
-export function showVersion() {
-  console.log('vibec v0.1.0'); // Replace with actual version
+export async function showVersion() {
+  try {
+    // Get package.json path relative to current file
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const packageJsonPath = path.join(__dirname, '..', 'package.json');
+    
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf8'));
+    console.log(`vibec v${packageJson.version || '0.0.0'}`);
+  } catch (error) {
+    console.error('Unable to determine version:', error.message);
+  }
 }
 
 /**
- * Load vibec.json configuration file
- * @param {string} workdir - Working directory
- * @returns {Promise<Object|null>} Parsed configuration or null if not found
+ * Load config file from the working directory
+ * @param {string} workdir - Working directory 
+ * @returns {Promise<Object>} Parsed config or empty object
  */
 export async function loadConfig(workdir) {
-  const configPath = path.join(workdir, 'vibec.json');
-  
   try {
+    const configPath = path.join(workdir, 'vibec.json');
+    
     // Check if config file exists
     try {
       await fs.access(configPath);
     } catch {
-      // No config file, return null
-      return null;
+      // No config file, return empty object
+      return {};
     }
     
     // Read and parse config file
@@ -108,132 +120,75 @@ export async function loadConfig(workdir) {
 }
 
 /**
- * Convert environment variables to options
- * @param {Object} env - Environment variables object
- * @returns {Object} Options derived from environment variables
- */
-export function envToOptions(env) {
-  const options = {};
-  
-  if (env.VIBEC_WORKDIR) options.workdir = env.VIBEC_WORKDIR;
-  if (env.VIBEC_STACKS) options.stacks = env.VIBEC_STACKS.split(',').map(s => s.trim());
-  if (env.VIBEC_DRY_RUN !== undefined) options.dryRun = env.VIBEC_DRY_RUN === 'true';
-  if (env.VIBEC_START) options.start = parseInt(env.VIBEC_START, 10);
-  if (env.VIBEC_END) options.end = parseInt(env.VIBEC_END, 10);
-  if (env.VIBEC_API_URL) options.apiUrl = env.VIBEC_API_URL;
-  if (env.VIBEC_API_KEY) options.apiKey = env.VIBEC_API_KEY;
-  if (env.VIBEC_API_MODEL) options.apiModel = env.VIBEC_API_MODEL;
-  if (env.VIBEC_TEST_CMD) options.testCmd = env.VIBEC_TEST_CMD;
-  if (env.VIBEC_RETRIES) options.retries = parseInt(env.VIBEC_RETRIES, 10);
-  if (env.VIBEC_PLUGIN_TIMEOUT) options.pluginTimeout = parseInt(env.VIBEC_PLUGIN_TIMEOUT, 10);
-  if (env.VIBEC_OUTPUT) options.output = env.VIBEC_OUTPUT;
-  
-  return options;
-}
-
-/**
- * Convert config file to options
- * @param {Object} config - Config file content
- * @returns {Object} Options derived from config file
- */
-export function configToOptions(config) {
-  const options = {};
-  
-  if (config.workdir) options.workdir = config.workdir;
-  if (config.stacks) options.stacks = config.stacks;
-  if (config.dryRun !== undefined) options.dryRun = config.dryRun;
-  if (config.start !== undefined) options.start = config.start;
-  if (config.end !== undefined) options.end = config.end;
-  if (config.apiUrl) options.apiUrl = config.apiUrl;
-  if (config.apiKey) options.apiKey = config.apiKey;
-  if (config.apiModel) options.apiModel = config.apiModel;
-  if (config.testCmd) options.testCmd = config.testCmd;
-  if (config.retries !== undefined) options.retries = config.retries;
-  if (config.pluginTimeout) options.pluginTimeout = config.pluginTimeout;
-  if (config.output) options.output = config.output;
-  
-  return options;
-}
-
-/**
- * Adjust option keys for consistency
- * @param {Object} options - Options with possible variations in key format
- * @returns {Object} Options with consistent key format
- */
-export function normalizeOptions(options) {
-  const normalized = {};
-  
-  // Map to consistent keys
-  const keyMap = {
-    'dry-run': 'dryRun',
-    'api-url': 'apiUrl',
-    'api-key': 'apiKey',
-    'api-model': 'apiModel',
-    'test-cmd': 'testCmd',
-    'plugin-timeout': 'pluginTimeout'
-  };
-  
-  // Copy all values, normalizing keys
-  for (const key in options) {
-    const normalizedKey = keyMap[key] || key;
-    normalized[normalizedKey] = options[key];
-  }
-  
-  return normalized;
-}
-
-/**
- * Validate options
- * @param {Object} options - Options to validate
- * @returns {void} Throws error for invalid options
- */
-export function validateOptions(options) {
-  if (options.retries !== undefined && (isNaN(options.retries) || options.retries < 0)) {
-    log.error('Invalid value for retries: must be a non-negative integer');
-    throw new Error('Invalid value for retries: must be a non-negative integer');
-  }
-  
-  if (options.pluginTimeout !== undefined && (isNaN(options.pluginTimeout) || options.pluginTimeout <= 0)) {
-    log.error('Invalid value for pluginTimeout: must be a positive integer');
-    throw new Error('Invalid value for pluginTimeout: must be a positive integer');
-  }
-}
-
-/**
- * Parse command line arguments and merge with config and env vars
+ * Parse command line arguments and merge with env vars and config file
  * @param {string[]} argv - Command line arguments
- * @param {Object} env - Environment variables object
- * @param {Object|null} vibecJson - Parsed vibec.json or null if not available
- * @returns {Object} Merged and normalized options
+ * @param {Object} env - Environment variables
+ * @param {Object} configFile - Config file contents
+ * @returns {Object} Parsed options
  */
-export function parseArgs(argv, env = {}, vibecJson = null) {
+export function parseArgs(argv, env = {}, configFile = {}) {
   // Default options
-  const defaultOptions = {
+  const defaults = {
     workdir: '.',
     stacks: ['core'],
-    dryRun: false,
+    'dry-run': false,
     start: null,
     end: null,
-    apiUrl: 'https://openrouter.ai/api/v1',
-    apiKey: null,
-    apiModel: 'anthropic/claude-3.7-sonnet',
-    testCmd: null,
+    'api-url': 'https://openrouter.ai/api/v1',
+    'api-key': null,
+    'api-model': 'anthropic/claude-3.7-sonnet',
+    'test-cmd': null,
     retries: 0,
-    pluginTimeout: 5000,
+    'plugin-timeout': 5000,
     output: 'output'
   };
 
-  // Check for help or version flags first
-  if (argv.includes('--help') || argv.includes('-h')) {
-    return { help: true };
-  }
-  
-  if (argv.includes('--version') || argv.includes('-v')) {
-    return { version: true };
-  }
-  
-  // Parse CLI arguments
+  // Map config file keys to CLI option keys
+  const configOptions = {
+    workdir: configFile.workdir,
+    stacks: configFile.stacks,
+    'dry-run': configFile.dryRun,
+    start: configFile.start,
+    end: configFile.end,
+    'api-url': configFile.apiUrl,
+    'api-key': configFile.apiKey,
+    'api-model': configFile.apiModel,
+    'test-cmd': configFile.testCmd,
+    retries: configFile.retries,
+    'plugin-timeout': configFile.pluginTimeout,
+    output: configFile.output
+  };
+
+  // Get options from environment variables
+  const envOptions = {
+    workdir: env.VIBEC_WORKDIR,
+    stacks: env.VIBEC_STACKS ? env.VIBEC_STACKS.split(',') : undefined,
+    'dry-run': env.VIBEC_DRY_RUN === 'true' ? true : 
+               env.VIBEC_DRY_RUN === 'false' ? false : undefined,
+    start: env.VIBEC_START !== undefined ? parseInt(env.VIBEC_START, 10) : undefined,
+    end: env.VIBEC_END !== undefined ? parseInt(env.VIBEC_END, 10) : undefined,
+    'api-url': env.VIBEC_API_URL,
+    'api-key': env.VIBEC_API_KEY,
+    'api-model': env.VIBEC_API_MODEL,
+    'test-cmd': env.VIBEC_TEST_CMD,
+    retries: env.VIBEC_RETRIES !== undefined ? parseInt(env.VIBEC_RETRIES, 10) : undefined,
+    'plugin-timeout': env.VIBEC_PLUGIN_TIMEOUT !== undefined ? 
+                     parseInt(env.VIBEC_PLUGIN_TIMEOUT, 10) : undefined,
+    output: env.VIBEC_OUTPUT
+  };
+
+  // Get options from CLI arguments
   const cliOptions = {};
+
+  // Handle special flags first
+  if (argv.includes('--help')) {
+    return { help: true, ...defaults };
+  }
+  
+  if (argv.includes('--version')) {
+    return { version: true, ...defaults };
+  }
+
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
     
@@ -245,10 +200,8 @@ export function parseArgs(argv, env = {}, vibecJson = null) {
         cliOptions[key] = value.split(',');
       } else if (key === 'dry-run') {
         cliOptions[key] = value.toLowerCase() !== 'false';
-      } else if (key === 'start' || key === 'end') {
+      } else if (key === 'start' || key === 'end' || key === 'retries' || key === 'plugin-timeout') {
         cliOptions[key] = value ? parseInt(value, 10) : null;
-      } else if (key === 'retries' || key === 'plugin-timeout') {
-        cliOptions[key] = parseInt(value, 10);
       } else {
         cliOptions[key] = value;
       }
@@ -269,10 +222,8 @@ export function parseArgs(argv, env = {}, vibecJson = null) {
         
         if (key === 'stacks') {
           cliOptions[key] = value.split(',');
-        } else if (key === 'start' || key === 'end') {
+        } else if (key === 'start' || key === 'end' || key === 'retries' || key === 'plugin-timeout') {
           cliOptions[key] = value ? parseInt(value, 10) : null;
-        } else if (key === 'retries' || key === 'plugin-timeout') {
-          cliOptions[key] = parseInt(value, 10);
         } else {
           cliOptions[key] = value;
         }
@@ -282,25 +233,38 @@ export function parseArgs(argv, env = {}, vibecJson = null) {
       }
     }
   }
-
-  // Get options from environment variables
-  const envOptions = envToOptions(env);
   
-  // Get options from config file
-  const configOptions = vibecJson ? configToOptions(vibecJson) : {};
+  // Merge options with precedence: CLI > env > config > defaults
+  const options = { ...defaults };
   
-  // Merge options with priority: CLI > env > config > defaults
-  let mergedOptions = {
-    ...defaultOptions,
-    ...configOptions,
-    ...envOptions,
-    ...normalizeOptions(cliOptions)
-  };
+  for (const key in defaults) {
+    if (configOptions[key] !== undefined) {
+      options[key] = configOptions[key];
+    }
+    if (envOptions[key] !== undefined) {
+      options[key] = envOptions[key];
+    }
+    if (cliOptions[key] !== undefined) {
+      options[key] = cliOptions[key];
+    }
+  }
 
+  // Add special flags if present
+  if (cliOptions.help) options.help = true;
+  if (cliOptions.version) options.version = true;
+  
   // Validate options
-  validateOptions(mergedOptions);
+  if (options.retries < 0) {
+    log.error(`Invalid value for retries: ${options.retries}. Must be a non-negative integer.`);
+    throw new Error(`Invalid value for retries: ${options.retries}. Must be a non-negative integer.`);
+  }
   
-  return mergedOptions;
+  if (options['plugin-timeout'] <= 0) {
+    log.error(`Invalid value for plugin-timeout: ${options['plugin-timeout']}. Must be a positive integer.`);
+    throw new Error(`Invalid value for plugin-timeout: ${options['plugin-timeout']}. Must be a positive integer.`);
+  }
+  
+  return options;
 }
 
 /**
@@ -340,10 +304,9 @@ export async function getPromptFiles(workdir, stacks) {
  * Load plugins for a stack
  * @param {string} workdir - Working directory
  * @param {string} stack - Stack name
- * @param {number} pluginTimeout - Timeout for plugins in milliseconds
  * @returns {Promise<string>} Concatenated plugin content
  */
-export async function loadPlugins(workdir, stack, pluginTimeout = 5000) {
+export async function loadPlugins(workdir, stack) {
   const pluginsDir = path.join(workdir, 'stacks', stack, 'plugins');
   let pluginContent = '';
   
@@ -369,15 +332,7 @@ export async function loadPlugins(workdir, stack, pluginTimeout = 5000) {
     // Load each plugin and append content
     for (const file of pluginFiles) {
       const filePath = path.join(pluginsDir, file);
-      
-      // Use a promise with timeout for plugin loading
-      const content = await Promise.race([
-        fs.readFile(filePath, 'utf8'),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error(`Plugin loading timeout: ${file}`)), pluginTimeout)
-        )
-      ]);
-      
+      const content = await fs.readFile(filePath, 'utf8');
       pluginContent += `\n\n${content}`;
       log.info(`Loaded plugin: ${stack}/${file}`);
     }
@@ -438,30 +393,32 @@ export async function buildPrompt(filePath, workdir, outputDir) {
  * @returns {Promise<string>} LLM response
  */
 export async function processLlm(prompt, options) {
-  if (options.dryRun) {
+  if (options['dry-run']) {
     log.info('--- DRY RUN MODE ---');
     log.info('Prompt:', prompt);
     return 'File: example/file\n```lang\ncontent\n```';
   }
 
-  if (!options.apiKey) {
+  if (!options['api-key']) {
     throw new Error('API key is required for LLM processing');
   }
 
-  const apiUrl = options.apiUrl;
-  const apiKey = options.apiKey;
-  const model = options.apiModel;
-  const maxRetries = options.retries;
-  
+  const apiUrl = options['api-url'];
+  const apiKey = options['api-key'];
+  const model = options['api-model'];
+  const maxRetries = options.retries || 0;
+
   log.info(`Sending request to ${apiUrl} with model ${model}`);
-  
+
+  let attempts = 0;
   let lastError = null;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    if (attempt > 0) {
-      log.info(`Retry attempt ${attempt}/${maxRetries}...`);
-    }
-    
+
+  while (attempts <= maxRetries) {
     try {
+      if (attempts > 0) {
+        log.info(`Retry attempt ${attempts}/${maxRetries}`);
+      }
+
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -491,20 +448,21 @@ export async function processLlm(prompt, options) {
       const data = await response.json();
       return data.choices[0].message.content;
     } catch (error) {
-      log.error(`Error processing LLM request (attempt ${attempt + 1}/${maxRetries + 1}):`, error);
       lastError = error;
+      log.error(`Error processing LLM request (attempt ${attempts + 1}/${maxRetries + 1}):`, error);
+      attempts++;
       
-      // Don't wait after the last attempt
-      if (attempt < maxRetries) {
-        // Simple exponential backoff
-        const waitTime = Math.min(1000 * Math.pow(2, attempt), 30000);
-        log.info(`Waiting ${waitTime}ms before retry...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
+      if (attempts <= maxRetries) {
+        // Wait before retrying (exponential backoff)
+        const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
+        log.info(`Waiting ${delay}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
   }
-  
-  throw lastError || new Error('All retry attempts failed');
+
+  // If we've exhausted all retries
+  throw lastError || new Error('Failed to process LLM request after all retry attempts');
 }
 
 /**
@@ -704,38 +662,37 @@ export async function copyGeneratedFiles(workdir, startStage, outputDir) {
  */
 export async function main(argv) {
   try {
-    // Get default workdir for loading config
-    const defaultWorkdir = '.';
-    
     // Load configuration file
-    let config = null;
+    const workdirArg = argv.find(arg => arg.startsWith('--workdir='));
+    const workdir = workdirArg ? workdirArg.split('=')[1] : '.';
+    
+    // Load config file from workdir
+    let configFile = {};
     try {
-      config = await loadConfig(defaultWorkdir);
-      if (config) {
+      configFile = await loadConfig(workdir);
+      if (Object.keys(configFile).length > 0) {
         log.info('Loaded configuration from vibec.json');
       }
     } catch (error) {
-      log.error('Error loading configuration:', error.message);
+      log.error('Error loading vibec.json:', error);
       throw error;
     }
     
-    // Parse arguments with environment variables and config
-    const options = parseArgs(argv, process.env, config);
+    // Parse arguments with config and env vars
+    const options = parseArgs(argv, process.env, configFile);
     
-    // Handle special flags
+    // Handle special options first
     if (options.help) {
-      showUsage();
+      await showHelp();
       return;
     }
     
     if (options.version) {
-      showVersion();
+      await showVersion();
       return;
     }
     
     log.info('Running with options:', JSON.stringify(options, null, 2));
-    
-    const outputDir = options.output;
     
     // Get prompt files within the specified range
     const promptFiles = await getPromptFiles(options.workdir, options.stacks);
@@ -749,6 +706,8 @@ export async function main(argv) {
     });
     
     log.info(`Will process ${filteredPromptFiles.length} prompt files`);
+    
+    const outputDir = options.output || 'output';
     
     // Initialize output/current directory
     await initializeOutputCurrent(options.workdir, outputDir);
@@ -773,7 +732,7 @@ export async function main(argv) {
       log.info(`Extracted ${files.length} files from LLM response`);
       
       // Write files unless in dry-run mode
-      if (!options.dryRun) {
+      if (!options['dry-run']) {
         await writeFiles(files, options.workdir, promptFile.stack, promptFile.number, path.basename(promptFile.file), outputDir);
       } else {
         log.info('Dry run mode - files not written');
@@ -781,8 +740,8 @@ export async function main(argv) {
     }
     
     // Run tests if test command is provided
-    if (options.testCmd) {
-      await runTests(options.testCmd);
+    if (options['test-cmd']) {
+      await runTests(options['test-cmd']);
     }
     
     log.success('Processing completed successfully');
@@ -793,6 +752,6 @@ export async function main(argv) {
 }
 
 // Only run main if this file is executed directly
-if (process.argv[1] === import.meta.url.substring('file://'.length)) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main(process.argv);
 }

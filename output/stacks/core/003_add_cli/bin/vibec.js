@@ -4,6 +4,8 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import https from 'https';
 import { execSync } from 'child_process';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 
 /**
  * Colored logging utility
@@ -46,34 +48,44 @@ export const log = {
 };
 
 /**
- * Show usage information
+ * Display help message
  */
-export function showUsage() {
+export async function showHelp() {
   console.log(`
 Usage: vibec [options]
 
 Options:
-  --help                Show this help message and exit
-  --version             Show version information and exit
-  --workdir=<dir>       Working directory (default: current directory)
-  --stacks=<names>      Comma-separated list of stacks to process (default: core)
-  --dry-run             Run without making changes (default: false)
-  --start=<number>      Start from prompt number (default: None)
-  --end=<number>        End at prompt number (default: None)
-  --api-url=<url>       API URL for LLM (default: https://openrouter.ai/api/v1)
-  --api-key=<key>       API Key for LLM
-  --api-model=<model>   Model to use (default: anthropic/claude-3.7-sonnet)
-  --test-cmd=<command>  Test command to run after processing
-  --retries=<number>    Number of retry attempts (default: 0)
-  --output=<dir>        Output directory (default: output)
+  --workdir=<dir>           Working directory (default: '.')
+  --stacks=<stack1,stack2>  Comma-separated list of stacks to process (default: 'core')
+  --dry-run                 Run without making any changes (default: false)
+  --start=<number>          Start at specific prompt number
+  --end=<number>            End at specific prompt number
+  --api-url=<url>           API URL (default: 'https://openrouter.ai/api/v1')
+  --api-key=<key>           API key (required)
+  --api-model=<model>       API model (default: 'anthropic/claude-3.7-sonnet')
+  --test-cmd=<command>      Command to run tests
+  --retries=<number>        Number of times to retry API calls (default: 0)
+  --output=<dir>            Output directory (default: 'output')
+  --help                    Show this help message
+  --version                 Show version information
 `);
 }
 
 /**
- * Show version information
+ * Display version information
  */
-export function showVersion() {
-  console.log('vibec v0.1.0'); // Replace with actual version
+export async function showVersion() {
+  try {
+    // Get package.json path relative to current file
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const packageJsonPath = path.join(__dirname, '..', 'package.json');
+    
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf8'));
+    console.log(`vibec v${packageJson.version || '0.0.0'}`);
+  } catch (error) {
+    console.error('Unable to determine version:', error.message);
+  }
 }
 
 /**
@@ -96,13 +108,13 @@ export function parseArgs(argv) {
     output: 'output'
   };
 
-  // Check for help or version flags first
-  if (argv.includes('--help') || argv.includes('-h')) {
-    return { help: true };
+  // Handle special flags first
+  if (argv.includes('--help')) {
+    return { help: true, ...options };
   }
   
-  if (argv.includes('--version') || argv.includes('-v')) {
-    return { version: true };
+  if (argv.includes('--version')) {
+    return { version: true, ...options };
   }
 
   for (let i = 2; i < argv.length; i++) {
@@ -121,7 +133,7 @@ export function parseArgs(argv) {
       } else if (key === 'retries') {
         const retries = parseInt(value, 10);
         if (isNaN(retries) || retries < 0) {
-          throw new Error(`Invalid value for --${key}: must be a non-negative integer`);
+          throw new Error(`Invalid value for --retries: ${value}. Must be a non-negative integer.`);
         }
         options[key] = retries;
       } else {
@@ -149,7 +161,7 @@ export function parseArgs(argv) {
         } else if (key === 'retries') {
           const retries = parseInt(value, 10);
           if (isNaN(retries) || retries < 0) {
-            throw new Error(`Invalid value for --${key}: must be a non-negative integer`);
+            throw new Error(`Invalid value for --retries: ${value}. Must be a non-negative integer.`);
           }
           options[key] = retries;
         } else {
@@ -304,17 +316,19 @@ export async function processLlm(prompt, options) {
   const apiUrl = options['api-url'];
   const apiKey = options['api-key'];
   const model = options['api-model'];
-  const maxRetries = options.retries;
-  
+  const maxRetries = options.retries || 0;
+
   log.info(`Sending request to ${apiUrl} with model ${model}`);
-  
+
+  let attempts = 0;
   let lastError = null;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    if (attempt > 0) {
-      log.info(`Retry attempt ${attempt}/${maxRetries}...`);
-    }
-    
+
+  while (attempts <= maxRetries) {
     try {
+      if (attempts > 0) {
+        log.info(`Retry attempt ${attempts}/${maxRetries}`);
+      }
+
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -344,20 +358,21 @@ export async function processLlm(prompt, options) {
       const data = await response.json();
       return data.choices[0].message.content;
     } catch (error) {
-      log.error(`Error processing LLM request (attempt ${attempt + 1}/${maxRetries + 1}):`, error);
       lastError = error;
+      log.error(`Error processing LLM request (attempt ${attempts + 1}/${maxRetries + 1}):`, error);
+      attempts++;
       
-      // Don't wait after the last attempt
-      if (attempt < maxRetries) {
-        // Simple exponential backoff
-        const waitTime = Math.min(1000 * Math.pow(2, attempt), 30000);
-        log.info(`Waiting ${waitTime}ms before retry...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
+      if (attempts <= maxRetries) {
+        // Wait before retrying (exponential backoff)
+        const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
+        log.info(`Waiting ${delay}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
   }
-  
-  throw lastError || new Error('All retry attempts failed');
+
+  // If we've exhausted all retries
+  throw lastError || new Error('Failed to process LLM request after all retry attempts');
 }
 
 /**
@@ -560,20 +575,18 @@ export async function main(argv) {
     // Parse arguments
     const options = parseArgs(argv);
     
-    // Handle special flags
+    // Handle special options first
     if (options.help) {
-      showUsage();
+      await showHelp();
       return;
     }
     
     if (options.version) {
-      showVersion();
+      await showVersion();
       return;
     }
     
     log.info('Running with options:', JSON.stringify(options, null, 2));
-    
-    const outputDir = options.output;
     
     // Get prompt files within the specified range
     const promptFiles = await getPromptFiles(options.workdir, options.stacks);
@@ -587,6 +600,8 @@ export async function main(argv) {
     });
     
     log.info(`Will process ${filteredPromptFiles.length} prompt files`);
+    
+    const outputDir = options.output || 'output';
     
     // Initialize output/current directory
     await initializeOutputCurrent(options.workdir, outputDir);
@@ -631,6 +646,6 @@ export async function main(argv) {
 }
 
 // Only run main if this file is executed directly
-if (process.argv[1] === import.meta.url.substring('file://'.length)) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main(process.argv);
 }

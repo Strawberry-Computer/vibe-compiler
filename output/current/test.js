@@ -1,259 +1,365 @@
 import tape from 'tape';
+import http from 'http';
 import path from 'path';
 import { promises as fs } from 'fs';
+import { fileURLToPath } from 'url';
 import os from 'os';
-import { parseArgs, loadConfig } from './bin/vibec.js';
+import { log, main, parseArgs, loadPlugins } from './bin/vibec.js';
 
-// Test config loading
-tape('Test loading config file', async t => {
-  // Create a temporary directory for the test
-  const tempDir = path.join(os.tmpdir(), `vibec-config-test-${Date.now()}`);
+// Helper to capture console output
+function captureOutput(fn) {
+  const messages = [];
+  const originalLogger = log.logger;
+  
+  log.logger = (...args) => {
+    messages.push(args.join(' '));
+  };
   
   try {
-    await fs.mkdir(tempDir, { recursive: true });
+    fn();
+  } finally {
+    log.logger = originalLogger;
+  }
+  
+  return messages;
+}
+
+// Test CLI argument parsing
+tape('Test CLI argument parsing', t => {
+  // Test --stacks with comma-separated values
+  const args1 = ['node', 'vibec.js', '--stacks=core,tests'];
+  const options1 = parseArgs(args1);
+  t.deepEqual(options1.stacks, ['core', 'tests'], 'Should parse comma-separated stacks');
+  
+  // Test --dry-run flag
+  const args2 = ['node', 'vibec.js', '--dry-run'];
+  const options2 = parseArgs(args2);
+  t.equal(options2['dry-run'], true, 'Should set dry-run flag');
+  
+  // Test --dry-run=false
+  const args3 = ['node', 'vibec.js', '--dry-run=false'];
+  const options3 = parseArgs(args3);
+  t.equal(options3['dry-run'], false, 'Should parse dry-run=false');
+  
+  // Test multiple arguments
+  const args4 = ['node', 'vibec.js', '--stacks=core,utils', '--api-url=http://localhost:3000', '--dry-run'];
+  const options4 = parseArgs(args4);
+  t.deepEqual(options4.stacks, ['core', 'utils'], 'Should parse stacks correctly');
+  t.equal(options4['api-url'], 'http://localhost:3000', 'Should set API URL');
+  t.equal(options4['dry-run'], true, 'Should set dry-run flag');
+  
+  t.end();
+});
+
+// Test loading plugins
+tape('Test loading plugins', async t => {
+  // Create a temporary directory for the test
+  const tempDir = path.join(os.tmpdir(), `vibec-plugin-test-${Date.now()}`);
+  await fs.mkdir(path.join(tempDir, 'stacks', 'test-stack', 'plugins'), { recursive: true });
+  
+  // Create a test plugin file
+  const pluginContent = '# Test Plugin\nThis is a test plugin content.';
+  await fs.writeFile(
+    path.join(tempDir, 'stacks', 'test-stack', 'plugins', 'test-plugin.md'),
+    pluginContent
+  );
+  
+  try {
+    // Load plugins
+    const result = await loadPlugins(tempDir, 'test-stack');
+    t.ok(result.includes('This is a test plugin content.'), 'Should load plugin content');
+  } finally {
+    // Clean up
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+  
+  t.end();
+});
+
+// Test real mode with mock API server and plugins
+tape('Test real mode with mock API server and plugins', async t => {
+  // Create a temporary directory for the test
+  const tempDir = path.join(os.tmpdir(), `vibec-test-${Date.now()}`);
+  const testWorkdir = path.join(tempDir, 'test-workdir');
+  
+  // Setup directories needed for the test
+  await fs.mkdir(path.join(testWorkdir, 'output', 'bootstrap'), { recursive: true });
+  await fs.mkdir(path.join(testWorkdir, 'stacks', 'test-stack', 'plugins'), { recursive: true });
+  
+  // Create a test prompt file
+  const promptContent = `# Test Prompt
+## Output: test.js
+`;
+  await fs.writeFile(
+    path.join(testWorkdir, 'stacks', 'test-stack', '001_test.md'),
+    promptContent
+  );
+  
+  // Create a plugin file
+  const pluginContent = '# Test Plugin\nThis adds functionality.';
+  await fs.writeFile(
+    path.join(testWorkdir, 'stacks', 'test-stack', 'plugins', 'test-plugin.md'),
+    pluginContent
+  );
+  
+  // Start a mock HTTP server that simulates the OpenAI API
+  const server = http.createServer((req, res) => {
+    // Mock API response
+    if (req.url === '/chat/completions' && req.method === 'POST') {
+      let body = '';
+      
+      req.on('data', chunk => {
+        body += chunk.toString();
+      });
+      
+      req.on('end', () => {
+        // Verify the request includes the plugin content
+        try {
+          const requestData = JSON.parse(body);
+          const userMessage = requestData.messages.find(m => m.role === 'user')?.content || '';
+          
+          t.ok(userMessage.includes('This adds functionality'), 'Request should include plugin content');
+          
+          // Return a mock response
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: 'File: test.js\n```js\nconsole.log("mock")\n```'
+                }
+              }
+            ]
+          }));
+        } catch (error) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: error.message }));
+        }
+      });
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  
+  // Start the server
+  await new Promise(resolve => {
+    server.listen(3000, resolve);
+  });
+  
+  try {
+    // Run the main function with mock API
+    await main([
+      'node', 'vibec.js',
+      '--api-url=http://localhost:3000',
+      '--api-key=test-key',
+      `--workdir=${testWorkdir}`,
+      '--dry-run=false',
+      '--stacks=test-stack'
+    ]);
     
-    // Test valid JSON config
-    const validConfig = {
-      stacks: ["core", "tests"],
-      testCmd: "npm test",
-      retries: 2,
-      pluginTimeout: 5000,
-      apiUrl: "https://openrouter.ai/api/v1",
-      apiModel: "anthropic/claude-3.7-sonnet",
-      output: "output"
+    // Check if the output file was created
+    const outputFileExists = await fs.access(path.join(testWorkdir, 'output', 'current', 'test.js'))
+      .then(() => true)
+      .catch(() => false);
+    
+    t.ok(outputFileExists, 'Output file was created');
+    
+    if (outputFileExists) {
+      const fileContent = await fs.readFile(path.join(testWorkdir, 'output', 'current', 'test.js'), 'utf8');
+      t.equal(fileContent, 'console.log("mock")', 'File content matches expected output');
+    }
+  } catch (error) {
+    t.fail(`Test failed with error: ${error.message}`);
+  } finally {
+    // Clean up
+    server.close();
+    
+    // Clean up temporary directory
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    } catch (err) {
+      console.error('Error cleaning up temp directory:', err);
+    }
+  }
+});
+
+// Test dry-run mode
+tape('Test dry-run mode', async t => {
+  // Create a temporary directory for the test
+  const tempDir = path.join(os.tmpdir(), `vibec-dry-run-test-${Date.now()}`);
+  const testWorkdir = path.join(tempDir, 'test-workdir');
+  
+  // Setup directories needed for the test
+  await fs.mkdir(path.join(testWorkdir, 'output', 'bootstrap'), { recursive: true });
+  await fs.mkdir(path.join(testWorkdir, 'stacks', 'core'), { recursive: true });
+  
+  // Create a test prompt file
+  const promptContent = `# Test Prompt
+## Output: dry-run-test.js
+`;
+  await fs.writeFile(
+    path.join(testWorkdir, 'stacks', 'core', '001_test.md'),
+    promptContent
+  );
+  
+  try {
+    // Capture output to verify dry-run behavior
+    const originalLogger = log.logger;
+    const messages = [];
+    
+    log.logger = (...args) => {
+      messages.push(args.join(' '));
     };
     
-    await fs.writeFile(
-      path.join(tempDir, 'vibec.json'),
-      JSON.stringify(validConfig, null, 2)
-    );
+    // Run with dry-run mode
+    await main([
+      'node', 'vibec.js',
+      `--workdir=${testWorkdir}`,
+      '--dry-run',
+      '--stacks=core'
+    ]);
     
-    const loadedConfig = await loadConfig(tempDir);
-    t.deepEqual(loadedConfig, validConfig, 'Should correctly load valid config file');
+    // Restore logger
+    log.logger = originalLogger;
     
-    // Test CLI args with loaded config
-    const args = ['node', 'vibec.js'];
-    const options = parseArgs(args, {}, loadedConfig);
+    // Check that dry-run message was logged
+    t.ok(messages.some(msg => msg.includes('DRY RUN MODE')), 'Dry-run mode message should be logged');
     
-    t.deepEqual(options.stacks, ["core", "tests"], 'Should merge config stacks value');
-    t.equal(options.testCmd, "npm test", 'Should merge config testCmd value');
-    t.equal(options.retries, 2, 'Should merge config retries value');
-    t.equal(options.pluginTimeout, 5000, 'Should merge config pluginTimeout value');
-    t.equal(options.apiUrl, "https://openrouter.ai/api/v1", 'Should merge config apiUrl value');
-    t.equal(options.apiModel, "anthropic/claude-3.7-sonnet", 'Should merge config apiModel value');
-    t.equal(options.output, "output", 'Should merge config output value');
+    // Check that the output file was NOT created
+    const outputFileExists = await fs.access(path.join(testWorkdir, 'output', 'current', 'dry-run-test.js'))
+      .then(() => true)
+      .catch(() => false);
     
+    t.notOk(outputFileExists, 'Output file should not be created in dry-run mode');
+  } catch (error) {
+    t.fail(`Test failed with error: ${error.message}`);
   } finally {
-    // Clean up
-    await fs.rm(tempDir, { recursive: true, force: true });
+    // Clean up temporary directory
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    } catch (err) {
+      console.error('Error cleaning up temp directory:', err);
+    }
   }
   
   t.end();
 });
 
-// Test malformed JSON config
-tape('Test loading malformed config file', async t => {
-  const tempDir = path.join(os.tmpdir(), `vibec-config-test-${Date.now()}`);
+// Test multiple stacks
+tape('Test processing multiple stacks', async t => {
+  // Create a temporary directory for the test
+  const tempDir = path.join(os.tmpdir(), `vibec-multi-stack-test-${Date.now()}`);
+  const testWorkdir = path.join(tempDir, 'test-workdir');
+  
+  // Setup directories needed for the test
+  await fs.mkdir(path.join(testWorkdir, 'output', 'bootstrap'), { recursive: true });
+  await fs.mkdir(path.join(testWorkdir, 'stacks', 'stack1'), { recursive: true });
+  await fs.mkdir(path.join(testWorkdir, 'stacks', 'stack2'), { recursive: true });
+  
+  // Create test prompt files
+  await fs.writeFile(
+    path.join(testWorkdir, 'stacks', 'stack1', '001_test.md'),
+    `# Test Prompt Stack1\n## Output: stack1.js\n`
+  );
+  
+  await fs.writeFile(
+    path.join(testWorkdir, 'stacks', 'stack2', '001_test.md'),
+    `# Test Prompt Stack2\n## Output: stack2.js\n`
+  );
+  
+  // Start a mock HTTP server that simulates the OpenAI API
+  const server = http.createServer((req, res) => {
+    // Mock API response
+    if (req.url === '/chat/completions' && req.method === 'POST') {
+      let body = '';
+      
+      req.on('data', chunk => {
+        body += chunk.toString();
+      });
+      
+      req.on('end', () => {
+        // Return a mock response based on the request content
+        try {
+          const requestData = JSON.parse(body);
+          const userMessage = requestData.messages.find(m => m.role === 'user')?.content || '';
+          
+          let response;
+          if (userMessage.includes('Test Prompt Stack1')) {
+            response = 'File: stack1.js\n```js\nconsole.log("stack1")\n```';
+          } else {
+            response = 'File: stack2.js\n```js\nconsole.log("stack2")\n```';
+          }
+          
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: response
+                }
+              }
+            ]
+          }));
+        } catch (error) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: error.message }));
+        }
+      });
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  
+  // Start the server
+  await new Promise(resolve => {
+    server.listen(3000, resolve);
+  });
   
   try {
-    await fs.mkdir(tempDir, { recursive: true });
+    // Run the main function with multiple stacks
+    await main([
+      'node', 'vibec.js',
+      '--api-url=http://localhost:3000',
+      '--api-key=test-key',
+      `--workdir=${testWorkdir}`,
+      '--stacks=stack1,stack2'
+    ]);
     
-    // Write malformed JSON
-    await fs.writeFile(
-      path.join(tempDir, 'vibec.json'),
-      '{ "stacks": ["core", "tests], "testCmd": "npm test" }'
-    );
+    // Check if both output files were created
+    const stack1FileExists = await fs.access(path.join(testWorkdir, 'output', 'current', 'stack1.js'))
+      .then(() => true)
+      .catch(() => false);
     
-    try {
-      await loadConfig(tempDir);
-      t.fail('Should throw error for malformed JSON');
-    } catch (error) {
-      t.ok(error.message.includes('Failed to parse vibec.json'), 'Should throw appropriate error for malformed JSON');
+    const stack2FileExists = await fs.access(path.join(testWorkdir, 'output', 'current', 'stack2.js'))
+      .then(() => true)
+      .catch(() => false);
+    
+    t.ok(stack1FileExists, 'Stack1 output file was created');
+    t.ok(stack2FileExists, 'Stack2 output file was created');
+    
+    if (stack1FileExists) {
+      const stack1Content = await fs.readFile(path.join(testWorkdir, 'output', 'current', 'stack1.js'), 'utf8');
+      t.equal(stack1Content, 'console.log("stack1")', 'Stack1 file content matches expected output');
     }
     
+    if (stack2FileExists) {
+      const stack2Content = await fs.readFile(path.join(testWorkdir, 'output', 'current', 'stack2.js'), 'utf8');
+      t.equal(stack2Content, 'console.log("stack2")', 'Stack2 file content matches expected output');
+    }
+  } catch (error) {
+    t.fail(`Test failed with error: ${error.message}`);
   } finally {
     // Clean up
-    await fs.rm(tempDir, { recursive: true, force: true });
-  }
-  
-  t.end();
-});
-
-// Test priority ordering - CLI args override env vars and config
-tape('Test CLI args override config and env vars', async t => {
-  const tempDir = path.join(os.tmpdir(), `vibec-config-test-${Date.now()}`);
-  
-  try {
-    await fs.mkdir(tempDir, { recursive: true });
+    server.close();
     
-    // Create config with stacks: ["core"]
-    await fs.writeFile(
-      path.join(tempDir, 'vibec.json'),
-      JSON.stringify({ stacks: ["core"] }, null, 2)
-    );
-    
-    const config = await loadConfig(tempDir);
-    
-    // Set up test environment vars
-    const env = { VIBEC_STACKS: 'core,tests' };
-    
-    // Set up CLI args
-    const args = ['node', 'vibec.js', '--stacks=tests'];
-    
-    // Parse options with all three sources
-    const options = parseArgs(args, env, config);
-    
-    // CLI args should override both env and config
-    t.deepEqual(options.stacks, ['tests'], 'CLI args should override both env vars and config');
-    
-  } finally {
-    // Clean up
-    await fs.rm(tempDir, { recursive: true, force: true });
-  }
-  
-  t.end();
-});
-
-// Test priority ordering - Env vars override config
-tape('Test env vars override config', async t => {
-  const tempDir = path.join(os.tmpdir(), `vibec-config-test-${Date.now()}`);
-  
-  try {
-    await fs.mkdir(tempDir, { recursive: true });
-    
-    // Create config with stacks: ["core"]
-    await fs.writeFile(
-      path.join(tempDir, 'vibec.json'),
-      JSON.stringify({ stacks: ["core"] }, null, 2)
-    );
-    
-    const config = await loadConfig(tempDir);
-    
-    // Set up test environment vars
-    const env = { VIBEC_STACKS: 'core,tests' };
-    
-    // Parse options without CLI args so env vars take precedence over config
-    const args = ['node', 'vibec.js'];
-    const options = parseArgs(args, env, config);
-    
-    // Env vars should override config
-    t.deepEqual(options.stacks, ['core', 'tests'], 'Env vars should override config values');
-    
-  } finally {
-    // Clean up
-    await fs.rm(tempDir, { recursive: true, force: true });
-  }
-  
-  t.end();
-});
-
-// Test defaults used for missing required fields
-tape('Test missing required fields use defaults', async t => {
-  const tempDir = path.join(os.tmpdir(), `vibec-config-test-${Date.now()}`);
-  
-  try {
-    await fs.mkdir(tempDir, { recursive: true });
-    
-    // Create config with minimal fields
-    await fs.writeFile(
-      path.join(tempDir, 'vibec.json'),
-      JSON.stringify({ output: "custom-output" }, null, 2)
-    );
-    
-    const config = await loadConfig(tempDir);
-    
-    // Parse options with minimal config
-    const args = ['node', 'vibec.js'];
-    const options = parseArgs(args, {}, config);
-    
-    // Should use defaults for missing fields
-    t.deepEqual(options.stacks, ['core'], 'Should use default stacks');
-    t.equal(options.dryRun, false, 'Should use default dryRun');
-    t.equal(options.apiUrl, 'https://openrouter.ai/api/v1', 'Should use default apiUrl');
-    t.equal(options.apiModel, 'anthropic/claude-3.7-sonnet', 'Should use default apiModel');
-    t.equal(options.retries, 0, 'Should use default retries');
-    t.equal(options.pluginTimeout, 5000, 'Should use default pluginTimeout');
-    
-    // Should use config value for specified field
-    t.equal(options.output, 'custom-output', 'Should use config value for output');
-    
-  } finally {
-    // Clean up
-    await fs.rm(tempDir, { recursive: true, force: true });
-  }
-  
-  t.end();
-});
-
-// Test environment variable conversion of VIBEC_STACKS string to array
-tape('Test VIBEC_STACKS string converted to array', async t => {
-  // Set up test environment vars
-  const env = { VIBEC_STACKS: 'core,tests,utils' };
-  
-  // Parse options with env vars
-  const args = ['node', 'vibec.js'];
-  const options = parseArgs(args, env);
-  
-  // VIBEC_STACKS string should be converted to array
-  t.ok(Array.isArray(options.stacks), 'VIBEC_STACKS should be converted to an array');
-  t.deepEqual(options.stacks, ['core', 'tests', 'utils'], 'VIBEC_STACKS should be split correctly');
-  
-  t.end();
-});
-
-// Test empty config loads properly
-tape('Test empty config loads properly', async t => {
-  const tempDir = path.join(os.tmpdir(), `vibec-config-test-${Date.now()}`);
-  
-  try {
-    await fs.mkdir(tempDir, { recursive: true });
-    
-    // Create empty config
-    await fs.writeFile(
-      path.join(tempDir, 'vibec.json'),
-      '{}'
-    );
-    
-    const config = await loadConfig(tempDir);
-    t.deepEqual(config, {}, 'Should load empty config as empty object');
-    
-    // Parse options with empty config
-    const args = ['node', 'vibec.js'];
-    const options = parseArgs(args, {}, config);
-    
-    // Should use defaults for all fields
-    t.deepEqual(options.stacks, ['core'], 'Should use default stacks');
-    t.equal(options.dryRun, false, 'Should use default dryRun');
-    
-  } finally {
-    // Clean up
-    await fs.rm(tempDir, { recursive: true, force: true });
-  }
-  
-  t.end();
-});
-
-// Test no config file
-tape('Test no config file', async t => {
-  const tempDir = path.join(os.tmpdir(), `vibec-config-test-${Date.now()}`);
-  
-  try {
-    await fs.mkdir(tempDir, { recursive: true });
-    
-    const config = await loadConfig(tempDir);
-    t.equal(config, null, 'Should return null for missing config file');
-    
-    // Parse options with null config
-    const args = ['node', 'vibec.js'];
-    const options = parseArgs(args, {}, null);
-    
-    // Should use defaults for all fields
-    t.deepEqual(options.stacks, ['core'], 'Should use default stacks');
-    t.equal(options.dryRun, false, 'Should use default dryRun');
-    
-  } finally {
-    // Clean up
-    await fs.rm(tempDir, { recursive: true, force: true });
+    // Clean up temporary directory
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    } catch (err) {
+      console.error('Error cleaning up temp directory:', err);
+    }
   }
   
   t.end();

@@ -4,7 +4,7 @@ Enhance CLI parsing in `vibec.js` with additional options.
 
 ### New CLI Options
 - `--help`: Show usage and exit. 
-- `--version`: Show `vibec vX.Y.Z` and exit.
+- `--version`: Show `vibec vX.Y.Z` and exit. Take version from `package.json`.
 - `--retries=<number>`: Retry count, non-negative integer. Default: `0`.
 - `--output=<dir>`: Output directory (e.g., `custom_output`). Default: `output`.
 
