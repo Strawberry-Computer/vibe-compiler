@@ -117,16 +117,67 @@ const generateFileDiff = async (previousFile, currentFile) => {
     if (await isDirectory(previousFile) || await isDirectory(currentFile)) {
       return 'Directory comparison not supported';
     }
-    const diff = execSync(`diff -u "${previousFile}" "${currentFile}"`, { encoding: 'utf8' });
-    return diff.split('\n').slice(3).map(line => {
-      if (line.startsWith('-')) {
-        return `<span class="diff-removed">${line}</span>`;
-      } else if (line.startsWith('+')) {
-        return `<span class="diff-added">${line}</span>`;
+
+    // Check if files exist
+    const previousExists = await fs.access(previousFile).then(() => true).catch(() => false);
+    const currentExists = await fs.access(currentFile).then(() => true).catch(() => false);
+
+    if (!previousExists && !currentExists) {
+      return 'Both files do not exist';
+    }
+
+    if (!previousExists) {
+      const content = await fs.readFile(currentFile, 'utf8');
+      return content.split('\n').map(line => `+ ${line}`).join('\n');
+    }
+
+    if (!currentExists) {
+      const content = await fs.readFile(previousFile, 'utf8');
+      return content.split('\n').map(line => `- ${line}`).join('\n');
+    }
+
+    // Use standard Unix diff command
+    try {
+      const diff = execSync(`diff -u "${previousFile}" "${currentFile}"`, { 
+        encoding: 'utf8',
+        maxBuffer: 10 * 1024 * 1024 // 10MB buffer
+      });
+
+      // Process the diff output, skipping the first 3 lines (header)
+      const lines = diff.split('\n').slice(3);
+      if (lines.length === 0) {
+        return 'No changes detected';
       }
-      return line;
-    }).join('\n');
+
+      return lines.map(line => {
+        if (line.startsWith('-')) {
+          return `<span class="diff-removed">${line}</span>`;
+        } else if (line.startsWith('+')) {
+          return `<span class="diff-added">${line}</span>`;
+        }
+        return line;
+      }).join('\n');
+    } catch (err) {
+      // If the error is just because files are different (exit code 1), use the error output
+      if (err.status === 1 && err.output && err.output[1]) {
+        const lines = err.output[1].split('\n').slice(3);
+        if (lines.length === 0) {
+          return 'No changes detected';
+        }
+
+        return lines.map(line => {
+          if (line.startsWith('-')) {
+            return `<span class="diff-removed">${line}</span>`;
+          } else if (line.startsWith('+')) {
+            return `<span class="diff-added">${line}</span>`;
+          }
+          return line;
+        }).join('\n');
+      }
+      throw err;
+    }
   } catch (err) {
+    console.error(`Error generating diff between ${previousFile} and ${currentFile}:`, err);
     return 'Error generating diff';
   }
 };
@@ -140,16 +191,85 @@ const isDirectory = async (filePath) => {
   }
 };
 
-const generateReport = async () => {
-  const stages = await getAllStages();
-  if (stages.length === 0) {
-    throw new Error('No stages found in output/stacks/core/ or output/stacks/tests/');
+const buildCompleteStageState = async (stage, tempDir) => {
+  // Create a temporary directory to store the complete state
+  const completeStateDir = path.join(tempDir, `complete_${stage}`);
+  await fs.mkdir(completeStateDir, { recursive: true });
+
+  // Get all stages up to and including the current stage
+  const allStages = await getAllStages();
+  const currentStageIndex = allStages.indexOf(stage);
+  const relevantStages = allStages.slice(0, currentStageIndex + 1);
+
+  console.log(`Building complete state for ${stage} using stages: ${relevantStages.join(', ')}`);
+
+  // First, copy bootstrap files if they exist
+  const bootstrapPath = path.join(process.cwd(), 'output', 'bootstrap');
+  if (await fs.access(bootstrapPath).then(() => true).catch(() => false)) {
+    console.log('Copying bootstrap files...');
+    try {
+      const copyDir = async (src, dest) => {
+        await fs.mkdir(dest, { recursive: true });
+        const entries = await fs.readdir(src, { withFileTypes: true });
+        
+        for (const entry of entries) {
+          const srcPath = path.join(src, entry.name);
+          const destPath = path.join(dest, entry.name);
+          
+          if (entry.isDirectory()) {
+            await copyDir(srcPath, destPath);
+          } else {
+            await fs.copyFile(srcPath, destPath);
+            console.log(`Copied bootstrap file ${entry.name}`);
+          }
+        }
+      };
+      
+      await copyDir(bootstrapPath, completeStateDir);
+    } catch (err) {
+      console.error('Error copying bootstrap files:', err);
+    }
   }
 
-  console.log(`Found ${stages.length} stages to process: ${stages.join(', ')}`);
+  // For each stage, copy its files to the complete state directory
+  for (const stage of relevantStages) {
+    const stagePath = validateStage(stage);
+    console.log(`Processing stage ${stage} at path ${stagePath}`);
+    
+    try {
+      const copyDir = async (src, dest) => {
+        await fs.mkdir(dest, { recursive: true });
+        const entries = await fs.readdir(src, { withFileTypes: true });
+        
+        for (const entry of entries) {
+          const srcPath = path.join(src, entry.name);
+          const destPath = path.join(dest, entry.name);
+          
+          if (entry.isDirectory()) {
+            await copyDir(srcPath, destPath);
+          } else {
+            await fs.copyFile(srcPath, destPath);
+            console.log(`Copied ${entry.name} from stage ${stage}`);
+          }
+        }
+      };
+      
+      await copyDir(stagePath, completeStateDir);
+    } catch (err) {
+      console.error(`Error processing stage ${stage}:`, err);
+      throw err;
+    }
+  }
 
-  // Generate HTML header
-  const htmlHeader = `
+  // Verify the complete state
+  const finalFiles = await fs.readdir(completeStateDir);
+  console.log(`Complete state for ${stage} contains ${finalFiles.length} files: ${finalFiles.join(', ')}`);
+
+  return completeStateDir;
+};
+
+// HTML Generation Utilities
+const generateHtmlHeader = (stages) => `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -255,172 +375,347 @@ const generateReport = async () => {
   </div>
 `;
 
-  let reportContent = htmlHeader;
+const generateStageHeader = (stageName, stageAnchor, description) => `
+  <h2 id="${stageAnchor}">${stageName}</h2>
+  <div class="stage-header">
+    <p>${description}</p>
+  </div>
+`;
+
+const generateNavigation = (previousAnchor, previousName, nextAnchor, nextName) => `
+  <div class="stage-navigation">
+    ${previousAnchor ? `<a href="#${previousAnchor}">← Previous: ${previousName}</a>` : '<span></span>'}
+    ${nextAnchor ? `<a href="#${nextAnchor}">Next: ${nextName} →</a>` : '<span></span>'}
+  </div>
+`;
+
+const generateFileList = (files, title, emptyMessage) => `
+  <h3>${title}</h3>
+  ${files.length > 0 ? `
+  <p>${files.length} files ${title.toLowerCase()} in this stage.</p>
+  <details>
+    <summary>View ${title.toLowerCase()}</summary>
+    <ul>
+      ${files.map(file => `<li>${file}</li>`).join('\n')}
+    </ul>
+  </details>` : `<p>${emptyMessage}</p>`}
+`;
+
+const generateFileContent = async (file, content, type) => {
+  const escapedContent = content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `
+      <h4>${file}</h4>
+      <pre class="diff-${type}">
+${escapedContent.split('\n').map(line => `${type === 'added' ? '+' : '-'} ${line}`).join('\n')}
+      </pre>`;
+};
+
+const generateStageSummary = (added, removed, modified) => `
+  <div class="summary">
+    <h3>Stage Summary</h3>
+    <ul>
+      <li>Added files: ${added}</li>
+      <li>Removed files: ${removed}</li>
+      <li>Modified files: ${modified}</li>
+      <li>Total changes: ${added + removed + modified}</li>
+    </ul>
+  </div>
+  <hr class="hr">
+`;
+
+const generateHtmlFooter = () => `
+</body>
+</html>
+`;
+
+const generateReport = async () => {
+  const stages = await getAllStages();
+  if (stages.length === 0) {
+    throw new Error('No stages found in output/stacks/core/ or output/stacks/tests/');
+  }
+
+  console.log(`Found ${stages.length} stages to process: ${stages.join(', ')}`);
+
+  // Create a temporary directory for storing complete states
+  const tempDir = path.join(process.cwd(), 'temp_states');
+  await fs.mkdir(tempDir, { recursive: true });
+
+  // Create bootstrap state if it exists
+  const bootstrapPath = path.join(process.cwd(), 'output', 'bootstrap');
+  const hasBootstrap = await fs.access(bootstrapPath).then(() => true).catch(() => false);
+  let bootstrapState = null;
+  
+  if (hasBootstrap) {
+    bootstrapState = path.join(tempDir, 'bootstrap');
+    await fs.mkdir(bootstrapState, { recursive: true });
+    const bootstrapFiles = await fs.readdir(bootstrapPath);
+    for (const file of bootstrapFiles) {
+      const sourcePath = path.join(bootstrapPath, file);
+      const targetPath = path.join(bootstrapState, file);
+      if (!(await isDirectory(sourcePath))) {
+        await fs.copyFile(sourcePath, targetPath);
+      }
+    }
+  }
+
+  let reportContent = generateHtmlHeader(stages);
 
   // Process each stage
   for (let i = 0; i < stages.length; i++) {
     const currentStage = stages[i];
-    const currentPath = validateStage(currentStage);
     const stageName = formatStageName(currentStage);
     const stageAnchor = generateAnchorId(currentStage);
 
+    let stageData;
+    let description;
+    let previousAnchor = null;
+    let previousName = null;
+    let nextAnchor = null;
+    let nextName = null;
+
     if (i === 0) {
       // First stage
-      reportContent += `
-  <h2 id="${stageAnchor}">${stageName}</h2>
-  <div class="stage-header">
-    <p>This is the first stage in the sequence.</p>
-  </div>
-  
-  <div class="stage-navigation">
-    <span></span>
-    ${i < stages.length - 1 ? `<a href="#${generateAnchorId(stages[i + 1])}">Next: ${formatStageName(stages[i + 1])} →</a>` : ''}
-  </div>`;
-
-      const promptFiles = await findPromptFiles(currentStage);
-      if (promptFiles.length > 0) {
-        reportContent += '\n  <h3>Prompts</h3>';
-        for (const promptFile of promptFiles) {
-          reportContent += await formatPromptContent(promptFile);
-        }
+      if (!hasBootstrap) {
+        throw new Error('Bootstrap state is required for the first stage');
       }
-
-      const files = await fs.readdir(currentPath);
-      reportContent += `
-  <h3>Initial Files</h3>
-  <p>This stage contains ${files.length} files.</p>
-  <details>
-    <summary>View file list</summary>
-    <ul>
-      ${files.map(file => `<li>${file}</li>`).join('\n')}
-    </ul>
-  </details>`;
+      stageData = await processFirstStage(currentStage, tempDir, bootstrapState);
+      description = 'Changes from bootstrap to first stage';
     } else {
       // Subsequent stages
       const previousStage = stages[i - 1];
-      const previousPath = validateStage(previousStage);
-      const previousAnchor = generateAnchorId(previousStage);
-      const previousName = formatStageName(previousStage);
-
-      reportContent += `
-  <h2 id="${stageAnchor}">${stageName}</h2>
-  <div class="stage-header">
-    <p>Changes from ${previousName} to ${stageName}</p>
-  </div>
-  
-  <div class="stage-navigation">
-    <a href="#${previousAnchor}">← Previous: ${previousName}</a>
-    ${i < stages.length - 1 ? `<a href="#${generateAnchorId(stages[i + 1])}">Next: ${formatStageName(stages[i + 1])} →</a>` : '<span></span>'}
-  </div>`;
-
-      const promptFiles = await findPromptFiles(currentStage);
-      if (promptFiles.length > 0) {
-        reportContent += '\n  <h3>Prompts</h3>';
-        for (const promptFile of promptFiles) {
-          reportContent += await formatPromptContent(promptFile);
-        }
-      }
-
-      const currentFiles = new Set(await fs.readdir(currentPath));
-      const previousFiles = new Set(await fs.readdir(previousPath));
-
-      // Added files
-      const addedFiles = [...currentFiles].filter(file => !previousFiles.has(file));
-      reportContent += `
-  <h3>Added Files</h3>
-  ${addedFiles.length > 0 ? `
-  <p>${addedFiles.length} new files were added in this stage.</p>
-  <details>
-    <summary>View added files</summary>
-    <ul>
-      ${addedFiles.map(file => `<li>${file}</li>`).join('\n')}
-    </ul>
-    <details>
-      <summary>View file contents</summary>
-      ${await Promise.all(addedFiles.map(async file => {
-        const filePath = path.join(currentPath, file);
-        if (await isDirectory(filePath)) return '';
-        const content = await fs.readFile(filePath, 'utf8');
-        return `
-      <h4>${file}</h4>
-      <pre class="diff-added">
-${content.split('\n').map(line => `+ ${line}`).join('\n')}
-      </pre>`;
-      })).then(results => results.join('\n'))}
-    </details>
-  </details>` : '<p>No files were added in this stage.</p>'}
-
-  <h3>Removed Files</h3>
-  ${[...previousFiles].filter(file => !currentFiles.has(file)).length > 0 ? `
-  <p>${[...previousFiles].filter(file => !currentFiles.has(file)).length} files were removed in this stage.</p>
-  <details>
-    <summary>View removed files</summary>
-    <ul>
-      ${[...previousFiles].filter(file => !currentFiles.has(file)).map(file => `<li>${file}</li>`).join('\n')}
-    </ul>
-    <details>
-      <summary>View removed content</summary>
-      ${await Promise.all([...previousFiles].filter(file => !currentFiles.has(file)).map(async file => {
-        const filePath = path.join(previousPath, file);
-        if (await isDirectory(filePath)) return '';
-        const content = await fs.readFile(filePath, 'utf8');
-        return `
-      <h4>${file}</h4>
-      <pre class="diff-removed">
-${content.split('\n').map(line => `- ${line}`).join('\n')}
-      </pre>`;
-      })).then(results => results.join('\n'))}
-    </details>
-  </details>` : '<p>No files were removed in this stage.</p>'}
-
-  <h3>Modified Files</h3>
-  ${[...currentFiles].filter(file => previousFiles.has(file)).length > 0 ? `
-  <p>${[...currentFiles].filter(file => previousFiles.has(file)).length} files were modified in this stage.</p>
-  <details>
-    <summary>View modified files</summary>
-    <ul>
-      ${[...currentFiles].filter(file => previousFiles.has(file)).map(file => `<li>${file}</li>`).join('\n')}
-    </ul>
-    <details>
-      <summary>View changes</summary>
-      ${await Promise.all([...currentFiles].filter(file => previousFiles.has(file)).map(async file => {
-        const filePath = path.join(currentPath, file);
-        if (await isDirectory(filePath)) return '';
-        const diff = await generateFileDiff(
-          path.join(previousPath, file),
-          path.join(currentPath, file)
-        );
-        return `
-      <h4>${file}</h4>
-      <pre>
-${diff}
-      </pre>`;
-      })).then(results => results.join('\n'))}
-    </details>
-  </details>` : '<p>No files were modified in this stage.</p>'}
-
-  <div class="summary">
-    <h3>Stage Summary</h3>
-    <ul>
-      <li>Added files: ${addedFiles.length}</li>
-      <li>Removed files: ${[...previousFiles].filter(file => !currentFiles.has(file)).length}</li>
-      <li>Modified files: ${[...currentFiles].filter(file => previousFiles.has(file)).length}</li>
-      <li>Total changes: ${addedFiles.length + [...previousFiles].filter(file => !currentFiles.has(file)).length + [...currentFiles].filter(file => previousFiles.has(file)).length}</li>
-    </ul>
-  </div>
-  <hr class="hr">`;
+      stageData = await processSubsequentStage(currentStage, previousStage, tempDir);
+      previousAnchor = generateAnchorId(previousStage);
+      previousName = formatStageName(previousStage);
+      description = `Changes from ${previousName} to ${stageName}`;
     }
+
+    if (i < stages.length - 1) {
+      nextAnchor = generateAnchorId(stages[i + 1]);
+      nextName = formatStageName(stages[i + 1]);
+    }
+
+    // Generate stage content
+    reportContent += generateStageHeader(stageName, stageAnchor, description);
+    reportContent += generateNavigation(previousAnchor, previousName, nextAnchor, nextName);
+
+    // Add prompts if any
+    const promptFiles = await findPromptFiles(currentStage);
+    if (promptFiles.length > 0) {
+      reportContent += '\n  <h3>Prompts</h3>';
+      for (const promptFile of promptFiles) {
+        reportContent += await formatPromptContent(promptFile);
+      }
+    }
+
+    // Add stage content
+    reportContent += await generateStageContent(stageData, i === 0);
   }
 
+  // Clean up temporary directory
+  await fs.rm(tempDir, { recursive: true, force: true });
+
   // Complete the HTML document
-  reportContent += `
-</body>
-</html>`;
+  reportContent += generateHtmlFooter();
 
   // Write the report
   await fs.writeFile(REPORT_FILE, reportContent);
   console.log(`Report generated: ${REPORT_FILE}`);
   console.log('All stages processed successfully');
+};
+
+// Stage Processing Functions
+const processFirstStage = async (stage, tempDir, bootstrapState) => {
+  const currentCompleteState = await buildCompleteStageState(stage, tempDir);
+  
+  // Get all files recursively with their relative paths
+  const getAllFiles = async (dir, baseDir = '') => {
+    const files = [];
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      const relativePath = path.join(baseDir, entry.name);
+      
+      if (entry.isDirectory()) {
+        const subFiles = await getAllFiles(fullPath, relativePath);
+        files.push(...subFiles);
+      } else {
+        files.push(relativePath);
+      }
+    }
+    return files;
+  };
+
+  const currentFiles = new Set(await getAllFiles(currentCompleteState));
+  const bootstrapFiles = new Set(await getAllFiles(bootstrapState));
+
+  const addedFiles = [...currentFiles].filter(file => !bootstrapFiles.has(file));
+  const removedFiles = [...bootstrapFiles].filter(file => !currentFiles.has(file));
+  
+  // Check for actual changes in potentially modified files
+  const potentiallyModifiedFiles = [...currentFiles].filter(file => bootstrapFiles.has(file));
+  const modifiedFiles = [];
+  
+  for (const file of potentiallyModifiedFiles) {
+    const currentPath = path.join(currentCompleteState, file);
+    const previousPath = path.join(bootstrapState, file);
+    
+    if (await fs.access(currentPath).then(() => true).catch(() => false) &&
+        await fs.access(previousPath).then(() => true).catch(() => false)) {
+      const diff = await generateFileDiff(previousPath, currentPath);
+      if (diff !== 'No changes detected') {
+        modifiedFiles.push(file);
+      }
+    }
+  }
+
+  return {
+    currentCompleteState,
+    previousCompleteState: bootstrapState,
+    addedFiles,
+    removedFiles,
+    modifiedFiles,
+    currentFiles,
+    previousFiles: bootstrapFiles
+  };
+};
+
+const processSubsequentStage = async (stage, previousStage, tempDir) => {
+  const currentCompleteState = await buildCompleteStageState(stage, tempDir);
+  const previousCompleteState = await buildCompleteStageState(previousStage, tempDir);
+  
+  // Get all files recursively with their relative paths
+  const getAllFiles = async (dir, baseDir = '') => {
+    const files = [];
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      const relativePath = path.join(baseDir, entry.name);
+      
+      if (entry.isDirectory()) {
+        const subFiles = await getAllFiles(fullPath, relativePath);
+        files.push(...subFiles);
+      } else {
+        files.push(relativePath);
+      }
+    }
+    return files;
+  };
+
+  const currentFiles = new Set(await getAllFiles(currentCompleteState));
+  const previousFiles = new Set(await getAllFiles(previousCompleteState));
+
+  const addedFiles = [...currentFiles].filter(file => !previousFiles.has(file));
+  const removedFiles = [...previousFiles].filter(file => !currentFiles.has(file));
+  
+  // Check for actual changes in potentially modified files
+  const potentiallyModifiedFiles = [...currentFiles].filter(file => previousFiles.has(file));
+  const modifiedFiles = [];
+  
+  for (const file of potentiallyModifiedFiles) {
+    const currentPath = path.join(currentCompleteState, file);
+    const previousPath = path.join(previousCompleteState, file);
+    
+    if (await fs.access(currentPath).then(() => true).catch(() => false) &&
+        await fs.access(previousPath).then(() => true).catch(() => false)) {
+      const diff = await generateFileDiff(previousPath, currentPath);
+      if (diff !== 'No changes detected') {
+        modifiedFiles.push(file);
+      }
+    }
+  }
+
+  return {
+    currentCompleteState,
+    previousCompleteState,
+    addedFiles,
+    removedFiles,
+    modifiedFiles,
+    currentFiles,
+    previousFiles
+  };
+};
+
+const generateStageContent = async (stageData, isFirstStage) => {
+  const {
+    currentCompleteState,
+    previousCompleteState,
+    addedFiles,
+    removedFiles,
+    modifiedFiles,
+    currentFiles,
+    previousFiles
+  } = stageData;
+
+  let content = '';
+
+  // Generate file lists
+  content += generateFileList(addedFiles, 'Added Files', 'No files were added in this stage.');
+  content += generateFileList(removedFiles, 'Removed Files', 'No files were removed in this stage.');
+  content += generateFileList(modifiedFiles, 'Modified Files', 'No files were modified in this stage.');
+
+  // Generate file contents
+  if (addedFiles.length > 0) {
+    content += '<details><summary>View file contents</summary>';
+    for (const file of addedFiles) {
+      const filePath = path.join(currentCompleteState, file);
+      if (!(await isDirectory(filePath))) {
+        try {
+          const fileContent = await fs.readFile(filePath, 'utf8');
+          content += await generateFileContent(file, fileContent, 'added');
+        } catch (err) {
+          console.error(`Error reading added file ${filePath}:`, err);
+          content += `<h4>${file}</h4><pre>Error reading file content</pre>`;
+        }
+      }
+    }
+    content += '</details>';
+  }
+
+  if (removedFiles.length > 0) {
+    content += '<details><summary>View removed content</summary>';
+    for (const file of removedFiles) {
+      const filePath = path.join(previousCompleteState, file);
+      if (!(await isDirectory(filePath))) {
+        try {
+          const fileContent = await fs.readFile(filePath, 'utf8');
+          content += await generateFileContent(file, fileContent, 'removed');
+        } catch (err) {
+          console.error(`Error reading removed file ${filePath}:`, err);
+          content += `<h4>${file}</h4><pre>Error reading file content</pre>`;
+        }
+      }
+    }
+    content += '</details>';
+  }
+
+  if (modifiedFiles.length > 0) {
+    content += '<details><summary>View changes</summary>';
+    for (const file of modifiedFiles) {
+      const currentPath = path.join(currentCompleteState, file);
+      const previousPath = path.join(previousCompleteState, file);
+      if (!(await isDirectory(currentPath))) {
+        try {
+          const diff = await generateFileDiff(previousPath, currentPath);
+          content += `<h4>${file}</h4><pre>${diff}</pre>`;
+        } catch (err) {
+          console.error(`Error generating diff for ${file}:`, err);
+          content += `<h4>${file}</h4><pre>Error generating diff</pre>`;
+        }
+      }
+    }
+    content += '</details>';
+  }
+
+  // Add stage summary
+  content += generateStageSummary(
+    addedFiles.length,
+    removedFiles.length,
+    modifiedFiles.length
+  );
+
+  return content;
 };
 
 // Run the script
