@@ -6,4 +6,4 @@
 
 - Use `tape` for testing. Don't use `jest` for anything.
 - Use async/await in `tape` tests. Don't use `t.end()`. 
-- Use `t.throws` to verify errors are thrown. There is no such thing as `t.rejects`.
+- Use `try`/`catch` to verify errors are thrown.

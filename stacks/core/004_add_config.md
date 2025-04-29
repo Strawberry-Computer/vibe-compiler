@@ -1,12 +1,14 @@
 # Add Configuration Support
 
 Add `vibec.json` loading to vibec.js, merging with existing CLI and env vars (priority: CLI > env > config > defaults):
-- Load `vibec.json` from root if present, parse as JSON. Throw error if malformed JSON.
+- Load `vibec.json` from root if present, parse as JSON.
+  - IMPORTANT: Throw error if malformed JSON.
+  - Don't throw error when no config file is present.
+  - Let errors propagate
 - Merge options with existing CLI args and env vars, using defaults only for unset values.
 - Convert `VIBEC_STACKS` to array if string.
 - Validate: `retries` ≥ 0, `pluginTimeout` > 0, log errors with `log` utility.
 - Update `parseArgs` to handle `vibec.json` and merge with CLI and env vars. It should take `process.env` and `vibecJson` as arguments in addition to `process.argv`.`
-- Throw error if `vibec.json` is malformed JSON.
 
 ## Config Options (vibec.json)
 - `workdir`: String, working directory. Default: `.`.
@@ -47,7 +49,7 @@ Add `vibec.json` loading to vibec.js, merging with existing CLI and env vars (pr
   "apiModel": "anthropic/claude-3.7-sonnet",
   "output": "output"
 }
-
+```
 
 ## Context: bin/vibec.js
 ## Output: bin/vibec.js
