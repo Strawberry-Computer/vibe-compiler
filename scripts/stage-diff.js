@@ -112,8 +112,11 @@ const getAllStages = async () => {
   return sortedStages;
 };
 
-const generateFileDiff = (previousFile, currentFile) => {
+const generateFileDiff = async (previousFile, currentFile) => {
   try {
+    if (await isDirectory(previousFile) || await isDirectory(currentFile)) {
+      return 'Directory comparison not supported';
+    }
     const diff = execSync(`diff -u "${previousFile}" "${currentFile}"`, { encoding: 'utf8' });
     return diff.split('\n').slice(3).map(line => {
       if (line.startsWith('-')) {
@@ -125,6 +128,15 @@ const generateFileDiff = (previousFile, currentFile) => {
     }).join('\n');
   } catch (err) {
     return 'Error generating diff';
+  }
+};
+
+const isDirectory = async (filePath) => {
+  try {
+    const stats = await fs.stat(filePath);
+    return stats.isDirectory();
+  } catch (err) {
+    return false;
   }
 };
 
@@ -326,7 +338,9 @@ const generateReport = async () => {
     <details>
       <summary>View file contents</summary>
       ${await Promise.all(addedFiles.map(async file => {
-        const content = await fs.readFile(path.join(currentPath, file), 'utf8');
+        const filePath = path.join(currentPath, file);
+        if (await isDirectory(filePath)) return '';
+        const content = await fs.readFile(filePath, 'utf8');
         return `
       <h4>${file}</h4>
       <pre class="diff-added">
@@ -347,7 +361,9 @@ ${content.split('\n').map(line => `+ ${line}`).join('\n')}
     <details>
       <summary>View removed content</summary>
       ${await Promise.all([...previousFiles].filter(file => !currentFiles.has(file)).map(async file => {
-        const content = await fs.readFile(path.join(previousPath, file), 'utf8');
+        const filePath = path.join(previousPath, file);
+        if (await isDirectory(filePath)) return '';
+        const content = await fs.readFile(filePath, 'utf8');
         return `
       <h4>${file}</h4>
       <pre class="diff-removed">
@@ -368,7 +384,9 @@ ${content.split('\n').map(line => `- ${line}`).join('\n')}
     <details>
       <summary>View changes</summary>
       ${await Promise.all([...currentFiles].filter(file => previousFiles.has(file)).map(async file => {
-        const diff = generateFileDiff(
+        const filePath = path.join(currentPath, file);
+        if (await isDirectory(filePath)) return '';
+        const diff = await generateFileDiff(
           path.join(previousPath, file),
           path.join(currentPath, file)
         );
