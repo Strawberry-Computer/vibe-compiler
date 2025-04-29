@@ -346,76 +346,6 @@ export async function getPromptFiles(workdir, stacks) {
 }
 
 /**
- * Load and execute dynamic JS plugins for a stack
- * @param {string} workdir - Working directory
- * @param {string} stack - Stack name
- * @param {Object} context - Context object for plugins
- * @param {number} pluginTimeout - Timeout for plugins in milliseconds
- * @returns {Promise<void>} 
- */
-export async function executeJsPlugins(workdir, stack, context, pluginTimeout = 5000) {
-  const pluginsDir = path.join(workdir, 'stacks', stack, 'plugins');
-  
-  try {
-    // Check if plugins directory exists
-    try {
-      await fs.access(pluginsDir);
-    } catch {
-      // No plugins directory, return
-      log.debug(`No plugins directory found for stack ${stack}`);
-      return;
-    }
-    
-    // Get all .js files in the plugins directory
-    const files = await fs.readdir(pluginsDir);
-    const jsPluginFiles = files
-      .filter(file => file.endsWith('.js'))
-      .sort(); // Sort alphabetically
-    
-    if (jsPluginFiles.length === 0) {
-      log.debug(`No JS plugins found for stack ${stack}`);
-      return;
-    }
-    
-    // Execute each JS plugin
-    for (const file of jsPluginFiles) {
-      const filePath = path.join(pluginsDir, file);
-      log.info(`Loading JS plugin: ${stack}/${file}`);
-      
-      try {
-        // Import the plugin dynamically
-        const pluginModule = await import(`file://${filePath}`);
-        
-        // Get the default export which should be a function
-        const pluginFunc = pluginModule.default;
-        
-        if (typeof pluginFunc !== 'function') {
-          log.error(`Plugin ${file} does not export a function as default export`);
-          continue;
-        }
-        
-        log.debug(`Executing plugin: ${stack}/${file}`);
-        
-        // Execute the plugin function with timeout
-        const result = await Promise.race([
-          pluginFunc(context),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error(`Plugin execution timeout: ${file} (${pluginTimeout}ms)`)), pluginTimeout)
-          )
-        ]);
-        
-        log.debug(`Plugin ${file} executed successfully:`, result);
-      } catch (error) {
-        log.error(`Error executing plugin ${file}:`, error.message);
-        // Skip this plugin but continue with others
-      }
-    }
-  } catch (error) {
-    log.error(`Error processing JS plugins for stack ${stack}:`, error.message);
-  }
-}
-
-/**
  * Load plugins for a stack
  * @param {string} workdir - Working directory
  * @param {string} stack - Stack name
@@ -813,17 +743,13 @@ export async function copyGeneratedFiles(workdir, startStage, outputDir) {
  * Process a prompt file with iterations for test fixes
  * @param {Object} promptFile - Prompt file information
  * @param {Object} options - Processing options
- * @param {Object} config - Configuration from vibec.json
- * @returns {Promise<boolean>} Success status
+ * @returns {Promise<void>}
  */
-export async function processPromptWithIterations(promptFile, options, config) {
+export async function processPromptWithIterations(promptFile, options) {
   log.info(`Processing: ${promptFile.file} (${promptFile.number})`);
   
   let testOutput = '';
   let success = true;
-  
-  // Read prompt content once for plugin context
-  const promptContent = await fs.readFile(promptFile.file, 'utf8');
   
   for (let iteration = 0; iteration < options.iterations; iteration++) {
     // On first iteration, don't include test output
@@ -833,23 +759,6 @@ export async function processPromptWithIterations(promptFile, options, config) {
       options.workdir, 
       options.output, 
       iteration > 0 ? testOutput : ''
-    );
-    
-    // Create context for dynamic plugins
-    const pluginContext = {
-      config: config,
-      stack: promptFile.stack,
-      promptNumber: promptFile.number,
-      promptContent: promptContent,
-      workingDir: path.join(options.workdir, options.output, 'current')
-    };
-    
-    // Execute JavaScript plugins
-    await executeJsPlugins(
-      options.workdir, 
-      promptFile.stack, 
-      pluginContext, 
-      options.pluginTimeout
     );
     
     // If not the first iteration, log that we're trying to fix test failures
@@ -966,7 +875,7 @@ export async function main(argv) {
     
     // Process each prompt file with iterations for test fixes
     for (const promptFile of filteredPromptFiles) {
-      await processPromptWithIterations(promptFile, options, config);
+      await processPromptWithIterations(promptFile, options);
     }
     
     log.success('Processing completed successfully');
