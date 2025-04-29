@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
-const path = require('path');
-const { execSync } = require('child_process');
-const { promisify } = require('util');
-const readdir = promisify(fs.readdir);
-const readFile = promisify(fs.readFile);
-const stat = promisify(fs.stat);
+import { promises as fs } from 'fs';
+import { existsSync } from 'fs';
+import path from 'path';
+import { execSync } from 'child_process';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Configuration
 const BASE_PATH = 'output/stacks';
@@ -38,7 +39,7 @@ const findPromptFiles = async (stage) => {
   const stacksDir = path.join(process.cwd(), 'stacks');
   
   try {
-    const files = await readdir(stacksDir);
+    const files = await fs.readdir(stacksDir);
     for (const file of files) {
       if (file.startsWith(stage) && file.endsWith('.md')) {
         promptFiles.push(path.join(stacksDir, file));
@@ -52,7 +53,7 @@ const findPromptFiles = async (stage) => {
 };
 
 const formatPromptContent = async (file) => {
-  const content = await readFile(file, 'utf8');
+  const content = await fs.readFile(file, 'utf8');
   const relativePath = path.relative(process.cwd(), file);
   const escapedContent = content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
   
@@ -68,7 +69,7 @@ const formatPromptContent = async (file) => {
 const validateStage = (stage) => {
   if (stage === 'current') {
     const currentPath = path.join(BASE_PATH, '..', 'current');
-    if (!fs.existsSync(currentPath)) {
+    if (!existsSync(currentPath)) {
       throw new Error('output/current directory not found');
     }
     return currentPath;
@@ -80,7 +81,7 @@ const validateStage = (stage) => {
 
   for (const dir of ['core', 'tests']) {
     const stagePath = path.join(BASE_PATH, dir, stage);
-    if (fs.existsSync(stagePath)) {
+    if (existsSync(stagePath)) {
       return stagePath;
     }
   }
@@ -93,9 +94,9 @@ const getAllStages = async () => {
   
   for (const dir of ['core', 'tests']) {
     const dirPath = path.join(BASE_PATH, dir);
-    if (!fs.existsSync(dirPath)) continue;
+    if (!existsSync(dirPath)) continue;
     
-    const files = await readdir(dirPath);
+    const files = await fs.readdir(dirPath);
     for (const file of files) {
       if (/^[0-9]{3}_/.test(file)) {
         stages.add(file);
@@ -104,7 +105,7 @@ const getAllStages = async () => {
   }
   
   const sortedStages = Array.from(stages).sort();
-  if (fs.existsSync(path.join(BASE_PATH, '..', 'current'))) {
+  if (existsSync(path.join(BASE_PATH, '..', 'current'))) {
     sortedStages.push('current');
   }
   
@@ -272,7 +273,7 @@ const generateReport = async () => {
         }
       }
 
-      const files = await readdir(currentPath);
+      const files = await fs.readdir(currentPath);
       reportContent += `
   <h3>Initial Files</h3>
   <p>This stage contains ${files.length} files.</p>
@@ -308,8 +309,8 @@ const generateReport = async () => {
         }
       }
 
-      const currentFiles = new Set(await readdir(currentPath));
-      const previousFiles = new Set(await readdir(previousPath));
+      const currentFiles = new Set(await fs.readdir(currentPath));
+      const previousFiles = new Set(await fs.readdir(previousPath));
 
       // Added files
       const addedFiles = [...currentFiles].filter(file => !previousFiles.has(file));
@@ -325,7 +326,7 @@ const generateReport = async () => {
     <details>
       <summary>View file contents</summary>
       ${await Promise.all(addedFiles.map(async file => {
-        const content = await readFile(path.join(currentPath, file), 'utf8');
+        const content = await fs.readFile(path.join(currentPath, file), 'utf8');
         return `
       <h4>${file}</h4>
       <pre class="diff-added">
@@ -346,7 +347,7 @@ ${content.split('\n').map(line => `+ ${line}`).join('\n')}
     <details>
       <summary>View removed content</summary>
       ${await Promise.all([...previousFiles].filter(file => !currentFiles.has(file)).map(async file => {
-        const content = await readFile(path.join(previousPath, file), 'utf8');
+        const content = await fs.readFile(path.join(previousPath, file), 'utf8');
         return `
       <h4>${file}</h4>
       <pre class="diff-removed">
@@ -399,7 +400,7 @@ ${diff}
 </html>`;
 
   // Write the report
-  await fs.promises.writeFile(REPORT_FILE, reportContent);
+  await fs.writeFile(REPORT_FILE, reportContent);
   console.log(`Report generated: ${REPORT_FILE}`);
   console.log('All stages processed successfully');
 };
