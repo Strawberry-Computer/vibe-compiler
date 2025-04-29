@@ -213,13 +213,13 @@ const buildCompleteStageState = async (stage, tempDir) => {
         const entries = await fs.readdir(src, { withFileTypes: true });
         
         for (const entry of entries) {
-          const srcPath = path.join(src, entry.name);
-          const destPath = path.join(dest, entry.name);
+          const sourcePath = path.join(src, entry.name);
+          const targetPath = path.join(dest, entry.name);
           
           if (entry.isDirectory()) {
-            await copyDir(srcPath, destPath);
+            await copyDir(sourcePath, targetPath);
           } else {
-            await fs.copyFile(srcPath, destPath);
+            await fs.copyFile(sourcePath, targetPath);
             console.log(`Copied bootstrap file ${entry.name}`);
           }
         }
@@ -448,14 +448,24 @@ const generateReport = async () => {
   if (hasBootstrap) {
     bootstrapState = path.join(tempDir, 'bootstrap');
     await fs.mkdir(bootstrapState, { recursive: true });
-    const bootstrapFiles = await fs.readdir(bootstrapPath);
-    for (const file of bootstrapFiles) {
-      const sourcePath = path.join(bootstrapPath, file);
-      const targetPath = path.join(bootstrapState, file);
-      if (!(await isDirectory(sourcePath))) {
-        await fs.copyFile(sourcePath, targetPath);
+    
+    const copyDir = async (src, dest) => {
+      await fs.mkdir(dest, { recursive: true });
+      const entries = await fs.readdir(src, { withFileTypes: true });
+      
+      for (const entry of entries) {
+        const sourcePath = path.join(src, entry.name);
+        const targetPath = path.join(dest, entry.name);
+        
+        if (entry.isDirectory()) {
+          await copyDir(sourcePath, targetPath);
+        } else {
+          await fs.copyFile(sourcePath, targetPath);
+        }
       }
-    }
+    };
+    
+    await copyDir(bootstrapPath, bootstrapState);
   }
 
   let reportContent = generateHtmlHeader(stages);
