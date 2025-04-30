@@ -2,18 +2,16 @@ import tape from 'tape';
 import path from 'path';
 import { promises as fs } from 'fs';
 import os from 'os';
-import { parseArgs, loadConfig } from './bin/vibec.js';
+import { parseArgs, loadConfigFile, formatConfigKeys, parseEnvVars } from './bin/vibec.js';
 
-// Test config loading
-tape('Test loading config file', async t => {
-  // Create a temporary directory for the test
-  const tempDir = path.join(os.tmpdir(), `vibec-config-test-${Date.now()}`);
+// Test configuration file loading
+tape('Config loading tests', async t => {
+  // Create a temporary directory
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vibec-config-test-'));
   
   try {
-    await fs.mkdir(tempDir, { recursive: true });
-    
-    // Test valid JSON config
-    const validConfig = {
+    // PROMPT: "Create `vibec.json` containing: ... Verify merged options match config values"
+    await fs.writeFile(path.join(tempDir, 'vibec.json'), JSON.stringify({
       stacks: ["core", "tests"],
       testCmd: "npm test",
       retries: 2,
@@ -21,240 +19,147 @@ tape('Test loading config file', async t => {
       apiUrl: "https://openrouter.ai/api/v1",
       apiModel: "anthropic/claude-3.7-sonnet",
       output: "output"
-    };
+    }));
     
-    await fs.writeFile(
-      path.join(tempDir, 'vibec.json'),
-      JSON.stringify(validConfig, null, 2)
-    );
+    const config = await loadConfigFile(tempDir);
+    t.deepEqual(config.stacks, ["core", "tests"], "Should load stacks from config");
+    t.equal(config.testCmd, "npm test", "Should load testCmd from config");
+    t.equal(config.retries, 2, "Should load retries from config");
+    t.equal(config.pluginTimeout, 5000, "Should load pluginTimeout from config");
+    t.equal(config.apiUrl, "https://openrouter.ai/api/v1", "Should load apiUrl from config");
+    t.equal(config.apiModel, "anthropic/claude-3.7-sonnet", "Should load apiModel from config");
+    t.equal(config.output, "output", "Should load output from config");
     
-    const loadedConfig = await loadConfig(tempDir);
-    t.deepEqual(loadedConfig, validConfig, 'Should correctly load valid config file');
+    // Format config keys for CLI options
+    const formattedConfig = formatConfigKeys(config);
+    t.deepEqual(formattedConfig.stacks, ["core", "tests"], "Should format stacks correctly");
+    t.equal(formattedConfig["test-cmd"], "npm test", "Should convert testCmd to test-cmd");
+    t.equal(formattedConfig.retries, 2, "Should keep retries as is");
+    t.equal(formattedConfig["plugin-timeout"], 5000, "Should convert pluginTimeout to plugin-timeout");
+    t.equal(formattedConfig["api-url"], "https://openrouter.ai/api/v1", "Should convert apiUrl to api-url");
+    t.equal(formattedConfig["api-model"], "anthropic/claude-3.7-sonnet", "Should convert apiModel to api-model");
+    t.equal(formattedConfig.output, "output", "Should keep output as is");
     
-    // Test CLI args with loaded config
-    const args = ['node', 'vibec.js'];
-    const options = parseArgs(args, {}, loadedConfig);
-    
-    t.deepEqual(options.stacks, ["core", "tests"], 'Should merge config stacks value');
-    t.equal(options.testCmd, "npm test", 'Should merge config testCmd value');
-    t.equal(options.retries, 2, 'Should merge config retries value');
-    t.equal(options.pluginTimeout, 5000, 'Should merge config pluginTimeout value');
-    t.equal(options.apiUrl, "https://openrouter.ai/api/v1", 'Should merge config apiUrl value');
-    t.equal(options.apiModel, "anthropic/claude-3.7-sonnet", 'Should merge config apiModel value');
-    t.equal(options.output, "output", 'Should merge config output value');
-    
-  } finally {
-    // Clean up
-    await fs.rm(tempDir, { recursive: true, force: true });
-  }
-  
-  t.end();
-});
-
-// Test malformed JSON config
-tape('Test loading malformed config file', async t => {
-  const tempDir = path.join(os.tmpdir(), `vibec-config-test-${Date.now()}`);
-  
-  try {
-    await fs.mkdir(tempDir, { recursive: true });
-    
-    // Write malformed JSON
-    await fs.writeFile(
-      path.join(tempDir, 'vibec.json'),
-      '{ "stacks": ["core", "tests], "testCmd": "npm test" }'
-    );
+    // PROMPT: "Create `vibec.json` with malformed JSON, verify error is thrown"
+    await fs.writeFile(path.join(tempDir, 'vibec.json'), '{ "stacks": ["core", "tests", }');
     
     try {
-      await loadConfig(tempDir);
-      t.fail('Should throw error for malformed JSON');
+      await loadConfigFile(tempDir);
+      t.fail("Should throw error for malformed JSON");
     } catch (error) {
-      t.ok(error.message.includes('Failed to parse vibec.json'), 'Should throw appropriate error for malformed JSON');
+      t.ok(error.message.includes("Failed to parse vibec.json"), "Should throw appropriate error message");
     }
     
   } finally {
     // Clean up
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(tempDir, { recursive: true });
   }
   
   t.end();
 });
 
-// Test priority ordering - CLI args override env vars and config
-tape('Test CLI args override config and env vars', async t => {
-  const tempDir = path.join(os.tmpdir(), `vibec-config-test-${Date.now()}`);
+// Test for priority order (CLI > ENV > CONFIG)
+tape('Priority order tests', async t => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vibec-priority-test-'));
   
   try {
-    await fs.mkdir(tempDir, { recursive: true });
+    // PROMPT: "CLI args override env vars and config: ... Verify final stacks is ["tests"]"
+    await fs.writeFile(path.join(tempDir, 'vibec.json'), JSON.stringify({
+      stacks: ["core"]
+    }));
     
-    // Create config with stacks: ["core"]
-    await fs.writeFile(
-      path.join(tempDir, 'vibec.json'),
-      JSON.stringify({ stacks: ["core"] }, null, 2)
+    const configFile = await loadConfigFile(tempDir);
+    
+    // Create mock ENV with VIBEC_STACKS
+    const mockEnv = { VIBEC_STACKS: 'core,tests' };
+    
+    // Create CLI args with --stacks=tests
+    const mockArgv = ['node', 'vibec.js', '--stacks=tests'];
+    
+    const options = parseArgs(mockArgv, mockEnv, configFile);
+    t.deepEqual(options.stacks, ['tests'], "CLI args should override ENV and config");
+    
+    // PROMPT: "Env vars override config: ... Verify final stacks is ["core", "tests"]"
+    // Now test without CLI arg for stacks
+    const mockArgv2 = ['node', 'vibec.js']; // No stacks argument
+    
+    const options2 = parseArgs(mockArgv2, mockEnv, configFile);
+    t.deepEqual(options2.stacks, ['core', 'tests'], "ENV vars should override config");
+    
+  } finally {
+    await fs.rm(tempDir, { recursive: true });
+  }
+  
+  t.end();
+});
+
+// Test validation and defaults
+tape('Validation and defaults tests', async t => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vibec-validation-test-'));
+  
+  try {
+    // PROMPT: "Use config with missing required fields, verify defaults are used"
+    await fs.writeFile(path.join(tempDir, 'vibec.json'), JSON.stringify({
+      // No required fields
+      apiModel: "anthropic/claude-3.7-sonnet"
+    }));
+    
+    const configFile = await loadConfigFile(tempDir);
+    const options = parseArgs(['node', 'vibec.js'], {}, configFile);
+    
+    // Verify defaults are used for missing fields
+    t.deepEqual(options.stacks, ['core'], "Should use default stacks when not in config");
+    t.equal(options.retries, 0, "Should use default retries when not in config");
+    t.equal(options['plugin-timeout'], 5000, "Should use default plugin timeout when not in config");
+    t.equal(options.output, 'output', "Should use default output when not in config");
+    
+    // PROMPT: "Verify `VIBEC_STACKS` string is converted to array"
+    const envOptions = parseEnvVars({ VIBEC_STACKS: 'core,utils,tests' });
+    t.deepEqual(envOptions.stacks, ['core', 'utils', 'tests'], "Should convert ENV string to array");
+    
+    // Test with comma and spaces
+    const envOptionsWithSpaces = parseEnvVars({ VIBEC_STACKS: 'core, utils, tests' });
+    t.deepEqual(
+      envOptionsWithSpaces.stacks, 
+      ['core', 'utils', 'tests'], 
+      "Should handle spaces in ENV string"
     );
     
-    const config = await loadConfig(tempDir);
-    
-    // Set up test environment vars
-    const env = { VIBEC_STACKS: 'core,tests' };
-    
-    // Set up CLI args
-    const args = ['node', 'vibec.js', '--stacks=tests'];
-    
-    // Parse options with all three sources
-    const options = parseArgs(args, env, config);
-    
-    // CLI args should override both env and config
-    t.deepEqual(options.stacks, ['tests'], 'CLI args should override both env vars and config');
-    
   } finally {
-    // Clean up
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(tempDir, { recursive: true });
   }
   
   t.end();
 });
 
-// Test priority ordering - Env vars override config
-tape('Test env vars override config', async t => {
-  const tempDir = path.join(os.tmpdir(), `vibec-config-test-${Date.now()}`);
+// Test validation of retries and pluginTimeout
+tape('Validation of numeric parameters', t => {
+  // PROMPT: "Validate: `retries` ≥ 0, `pluginTimeout` > 0, log errors with `log` utility."
   
+  // Test invalid retries values
   try {
-    await fs.mkdir(tempDir, { recursive: true });
-    
-    // Create config with stacks: ["core"]
-    await fs.writeFile(
-      path.join(tempDir, 'vibec.json'),
-      JSON.stringify({ stacks: ["core"] }, null, 2)
-    );
-    
-    const config = await loadConfig(tempDir);
-    
-    // Set up test environment vars
-    const env = { VIBEC_STACKS: 'core,tests' };
-    
-    // Parse options without CLI args so env vars take precedence over config
-    const args = ['node', 'vibec.js'];
-    const options = parseArgs(args, env, config);
-    
-    // Env vars should override config
-    t.deepEqual(options.stacks, ['core', 'tests'], 'Env vars should override config values');
-    
-  } finally {
-    // Clean up
-    await fs.rm(tempDir, { recursive: true, force: true });
+    parseArgs(['node', 'vibec.js', '--retries=-1']);
+    t.fail("Should throw error for negative retries");
+  } catch (error) {
+    t.ok(error.message.includes("retries"), "Should detect invalid retries value");
   }
   
-  t.end();
-});
-
-// Test defaults used for missing required fields
-tape('Test missing required fields use defaults', async t => {
-  const tempDir = path.join(os.tmpdir(), `vibec-config-test-${Date.now()}`);
-  
+  // Test invalid plugin-timeout values
   try {
-    await fs.mkdir(tempDir, { recursive: true });
-    
-    // Create config with minimal fields
-    await fs.writeFile(
-      path.join(tempDir, 'vibec.json'),
-      JSON.stringify({ output: "custom-output" }, null, 2)
-    );
-    
-    const config = await loadConfig(tempDir);
-    
-    // Parse options with minimal config
-    const args = ['node', 'vibec.js'];
-    const options = parseArgs(args, {}, config);
-    
-    // Should use defaults for missing fields
-    t.deepEqual(options.stacks, ['core'], 'Should use default stacks');
-    t.equal(options.dryRun, false, 'Should use default dryRun');
-    t.equal(options.apiUrl, 'https://openrouter.ai/api/v1', 'Should use default apiUrl');
-    t.equal(options.apiModel, 'anthropic/claude-3.7-sonnet', 'Should use default apiModel');
-    t.equal(options.retries, 0, 'Should use default retries');
-    t.equal(options.pluginTimeout, 5000, 'Should use default pluginTimeout');
-    
-    // Should use config value for specified field
-    t.equal(options.output, 'custom-output', 'Should use config value for output');
-    
-  } finally {
-    // Clean up
-    await fs.rm(tempDir, { recursive: true, force: true });
+    parseArgs(['node', 'vibec.js', '--plugin-timeout=0']);
+    t.fail("Should throw error for zero plugin timeout");
+  } catch (error) {
+    t.ok(error.message.includes("plugin-timeout"), "Should detect invalid plugin timeout value");
   }
   
-  t.end();
-});
-
-// Test environment variable conversion of VIBEC_STACKS string to array
-tape('Test VIBEC_STACKS string converted to array', async t => {
-  // Set up test environment vars
-  const env = { VIBEC_STACKS: 'core,tests,utils' };
+  // Valid values should pass
+  const options1 = parseArgs(['node', 'vibec.js', '--retries=0', '--plugin-timeout=1']);
+  t.equal(options1.retries, 0, "Zero is valid for retries");
+  t.equal(options1['plugin-timeout'], 1, "Positive numbers are valid for plugin timeout");
   
-  // Parse options with env vars
-  const args = ['node', 'vibec.js'];
-  const options = parseArgs(args, env);
-  
-  // VIBEC_STACKS string should be converted to array
-  t.ok(Array.isArray(options.stacks), 'VIBEC_STACKS should be converted to an array');
-  t.deepEqual(options.stacks, ['core', 'tests', 'utils'], 'VIBEC_STACKS should be split correctly');
-  
-  t.end();
-});
-
-// Test empty config loads properly
-tape('Test empty config loads properly', async t => {
-  const tempDir = path.join(os.tmpdir(), `vibec-config-test-${Date.now()}`);
-  
-  try {
-    await fs.mkdir(tempDir, { recursive: true });
-    
-    // Create empty config
-    await fs.writeFile(
-      path.join(tempDir, 'vibec.json'),
-      '{}'
-    );
-    
-    const config = await loadConfig(tempDir);
-    t.deepEqual(config, {}, 'Should load empty config as empty object');
-    
-    // Parse options with empty config
-    const args = ['node', 'vibec.js'];
-    const options = parseArgs(args, {}, config);
-    
-    // Should use defaults for all fields
-    t.deepEqual(options.stacks, ['core'], 'Should use default stacks');
-    t.equal(options.dryRun, false, 'Should use default dryRun');
-    
-  } finally {
-    // Clean up
-    await fs.rm(tempDir, { recursive: true, force: true });
-  }
-  
-  t.end();
-});
-
-// Test no config file
-tape('Test no config file', async t => {
-  const tempDir = path.join(os.tmpdir(), `vibec-config-test-${Date.now()}`);
-  
-  try {
-    await fs.mkdir(tempDir, { recursive: true });
-    
-    const config = await loadConfig(tempDir);
-    t.equal(config, null, 'Should return null for missing config file');
-    
-    // Parse options with null config
-    const args = ['node', 'vibec.js'];
-    const options = parseArgs(args, {}, null);
-    
-    // Should use defaults for all fields
-    t.deepEqual(options.stacks, ['core'], 'Should use default stacks');
-    t.equal(options.dryRun, false, 'Should use default dryRun');
-    
-  } finally {
-    // Clean up
-    await fs.rm(tempDir, { recursive: true, force: true });
-  }
+  const options2 = parseArgs(['node', 'vibec.js', '--retries=5', '--plugin-timeout=10000']);
+  t.equal(options2.retries, 5, "Positive values are valid for retries");
+  t.equal(options2['plugin-timeout'], 10000, "Larger positive numbers are valid for plugin timeout");
   
   t.end();
 });

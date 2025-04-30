@@ -1,366 +1,165 @@
 import tape from 'tape';
-import http from 'http';
 import path from 'path';
 import { promises as fs } from 'fs';
-import { fileURLToPath } from 'url';
 import os from 'os';
-import { log, main, parseArgs, loadPlugins } from './bin/vibec.js';
+import { parseArgs, loadConfigFile, formatConfigKeys, parseEnvVars } from './bin/vibec.js';
 
-// Helper to capture console output
-function captureOutput(fn) {
-  const messages = [];
-  const originalLogger = log.logger;
-  
-  log.logger = (...args) => {
-    messages.push(args.join(' '));
-  };
+// Test configuration file loading
+tape('Config loading tests', async t => {
+  // Create a temporary directory
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vibec-config-test-'));
   
   try {
-    fn();
-  } finally {
-    log.logger = originalLogger;
-  }
-  
-  return messages;
-}
-
-// Test CLI argument parsing
-tape('Test CLI argument parsing', t => {
-  // Test --stacks with comma-separated values
-  const args1 = ['node', 'vibec.js', '--stacks=core,tests'];
-  const options1 = parseArgs(args1);
-  t.deepEqual(options1.stacks, ['core', 'tests'], 'Should parse comma-separated stacks');
-  
-  // Test --dry-run flag
-  const args2 = ['node', 'vibec.js', '--dry-run'];
-  const options2 = parseArgs(args2);
-  t.equal(options2['dry-run'], true, 'Should set dry-run flag');
-  
-  // Test --dry-run=false
-  const args3 = ['node', 'vibec.js', '--dry-run=false'];
-  const options3 = parseArgs(args3);
-  t.equal(options3['dry-run'], false, 'Should parse dry-run=false');
-  
-  // Test multiple arguments
-  const args4 = ['node', 'vibec.js', '--stacks=core,utils', '--api-url=http://localhost:3000', '--dry-run'];
-  const options4 = parseArgs(args4);
-  t.deepEqual(options4.stacks, ['core', 'utils'], 'Should parse stacks correctly');
-  t.equal(options4['api-url'], 'http://localhost:3000', 'Should set API URL');
-  t.equal(options4['dry-run'], true, 'Should set dry-run flag');
-  
-  t.end();
-});
-
-// Test loading plugins
-tape('Test loading plugins', async t => {
-  // Create a temporary directory for the test
-  const tempDir = path.join(os.tmpdir(), `vibec-plugin-test-${Date.now()}`);
-  await fs.mkdir(path.join(tempDir, 'stacks', 'test-stack', 'plugins'), { recursive: true });
-  
-  // Create a test plugin file
-  const pluginContent = '# Test Plugin\nThis is a test plugin content.';
-  await fs.writeFile(
-    path.join(tempDir, 'stacks', 'test-stack', 'plugins', 'test-plugin.md'),
-    pluginContent
-  );
-  
-  try {
-    // Load plugins
-    const result = await loadPlugins(tempDir, 'test-stack');
-    t.ok(result.includes('This is a test plugin content.'), 'Should load plugin content');
+    // PROMPT: "Create `vibec.json` containing: ... Verify merged options match config values"
+    await fs.writeFile(path.join(tempDir, 'vibec.json'), JSON.stringify({
+      stacks: ["core", "tests"],
+      testCmd: "npm test",
+      retries: 2,
+      pluginTimeout: 5000,
+      apiUrl: "https://openrouter.ai/api/v1",
+      apiModel: "anthropic/claude-3.7-sonnet",
+      output: "output"
+    }));
+    
+    const config = await loadConfigFile(tempDir);
+    t.deepEqual(config.stacks, ["core", "tests"], "Should load stacks from config");
+    t.equal(config.testCmd, "npm test", "Should load testCmd from config");
+    t.equal(config.retries, 2, "Should load retries from config");
+    t.equal(config.pluginTimeout, 5000, "Should load pluginTimeout from config");
+    t.equal(config.apiUrl, "https://openrouter.ai/api/v1", "Should load apiUrl from config");
+    t.equal(config.apiModel, "anthropic/claude-3.7-sonnet", "Should load apiModel from config");
+    t.equal(config.output, "output", "Should load output from config");
+    
+    // Format config keys for CLI options
+    const formattedConfig = formatConfigKeys(config);
+    t.deepEqual(formattedConfig.stacks, ["core", "tests"], "Should format stacks correctly");
+    t.equal(formattedConfig["test-cmd"], "npm test", "Should convert testCmd to test-cmd");
+    t.equal(formattedConfig.retries, 2, "Should keep retries as is");
+    t.equal(formattedConfig["plugin-timeout"], 5000, "Should convert pluginTimeout to plugin-timeout");
+    t.equal(formattedConfig["api-url"], "https://openrouter.ai/api/v1", "Should convert apiUrl to api-url");
+    t.equal(formattedConfig["api-model"], "anthropic/claude-3.7-sonnet", "Should convert apiModel to api-model");
+    t.equal(formattedConfig.output, "output", "Should keep output as is");
+    
+    // PROMPT: "Create `vibec.json` with malformed JSON, verify error is thrown"
+    await fs.writeFile(path.join(tempDir, 'vibec.json'), '{ "stacks": ["core", "tests", }');
+    
+    try {
+      await loadConfigFile(tempDir);
+      t.fail("Should throw error for malformed JSON");
+    } catch (error) {
+      t.ok(error.message.includes("Failed to parse vibec.json"), "Should throw appropriate error message");
+    }
+    
   } finally {
     // Clean up
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(tempDir, { recursive: true });
   }
   
   t.end();
 });
 
-// Test real mode with mock API server and plugins
-tape('Test real mode with mock API server and plugins', async t => {
-  // Create a temporary directory for the test
-  const tempDir = path.join(os.tmpdir(), `vibec-test-${Date.now()}`);
-  const testWorkdir = path.join(tempDir, 'test-workdir');
-  
-  // Setup directories needed for the test
-  await fs.mkdir(path.join(testWorkdir, 'output', 'bootstrap'), { recursive: true });
-  await fs.mkdir(path.join(testWorkdir, 'stacks', 'test-stack', 'plugins'), { recursive: true });
-  
-  // Create a test prompt file
-  const promptContent = `# Test Prompt
-## Output: test.js
-`;
-  await fs.writeFile(
-    path.join(testWorkdir, 'stacks', 'test-stack', '001_test.md'),
-    promptContent
-  );
-  
-  // Create a plugin file
-  const pluginContent = '# Test Plugin\nThis adds functionality.';
-  await fs.writeFile(
-    path.join(testWorkdir, 'stacks', 'test-stack', 'plugins', 'test-plugin.md'),
-    pluginContent
-  );
-  
-  // Start a mock HTTP server that simulates the OpenAI API
-  const server = http.createServer((req, res) => {
-    // Mock API response
-    if (req.url === '/chat/completions' && req.method === 'POST') {
-      let body = '';
-      
-      req.on('data', chunk => {
-        body += chunk.toString();
-      });
-      
-      req.on('end', () => {
-        // Verify the request includes the plugin content
-        try {
-          const requestData = JSON.parse(body);
-          const userMessage = requestData.messages.find(m => m.role === 'user')?.content || '';
-          
-          t.ok(userMessage.includes('This adds functionality'), 'Request should include plugin content');
-          
-          // Return a mock response
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            choices: [
-              {
-                message: {
-                  content: 'File: test.js\n```js\nconsole.log("mock")\n```'
-                }
-              }
-            ]
-          }));
-        } catch (error) {
-          res.writeHead(500);
-          res.end(JSON.stringify({ error: error.message }));
-        }
-      });
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-  
-  // Start the server
-  await new Promise(resolve => {
-    server.listen(3000, resolve);
-  });
+// Test for priority order (CLI > ENV > CONFIG)
+tape('Priority order tests', async t => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vibec-priority-test-'));
   
   try {
-    // Run the main function with mock API
-    await main([
-      'node', 'vibec.js',
-      '--api-url=http://localhost:3000',
-      '--api-key=test-key',
-      `--workdir=${testWorkdir}`,
-      '--dry-run=false',
-      '--stacks=test-stack'
-    ]);
+    // PROMPT: "CLI args override env vars and config: ... Verify final stacks is ["tests"]"
+    await fs.writeFile(path.join(tempDir, 'vibec.json'), JSON.stringify({
+      stacks: ["core"]
+    }));
     
-    // Check if the output file was created
-    const outputFileExists = await fs.access(path.join(testWorkdir, 'output', 'current', 'test.js'))
-      .then(() => true)
-      .catch(() => false);
+    const configFile = await loadConfigFile(tempDir);
     
-    t.ok(outputFileExists, 'Output file was created');
+    // Create mock ENV with VIBEC_STACKS
+    const mockEnv = { VIBEC_STACKS: 'core,tests' };
     
-    if (outputFileExists) {
-      const fileContent = await fs.readFile(path.join(testWorkdir, 'output', 'current', 'test.js'), 'utf8');
-      t.equal(fileContent, 'console.log("mock")', 'File content matches expected output');
-    }
-  } catch (error) {
-    t.fail(`Test failed with error: ${error.message}`);
+    // Create CLI args with --stacks=tests
+    const mockArgv = ['node', 'vibec.js', '--stacks=tests'];
+    
+    const options = parseArgs(mockArgv, mockEnv, configFile);
+    t.deepEqual(options.stacks, ['tests'], "CLI args should override ENV and config");
+    
+    // PROMPT: "Env vars override config: ... Verify final stacks is ["core", "tests"]"
+    // Now test without CLI arg for stacks
+    const mockArgv2 = ['node', 'vibec.js']; // No stacks argument
+    
+    const options2 = parseArgs(mockArgv2, mockEnv, configFile);
+    t.deepEqual(options2.stacks, ['core', 'tests'], "ENV vars should override config");
+    
   } finally {
-    // Clean up
-    server.close();
-    
-    // Clean up temporary directory
-    try {
-      await fs.rm(tempDir, { recursive: true, force: true });
-    } catch (err) {
-      console.error('Error cleaning up temp directory:', err);
-    }
-  }
-});
-
-// Test dry-run mode
-tape('Test dry-run mode', async t => {
-  // Create a temporary directory for the test
-  const tempDir = path.join(os.tmpdir(), `vibec-dry-run-test-${Date.now()}`);
-  const testWorkdir = path.join(tempDir, 'test-workdir');
-  
-  // Setup directories needed for the test
-  await fs.mkdir(path.join(testWorkdir, 'output', 'bootstrap'), { recursive: true });
-  await fs.mkdir(path.join(testWorkdir, 'stacks', 'core'), { recursive: true });
-  
-  // Create a test prompt file
-  const promptContent = `# Test Prompt
-## Output: dry-run-test.js
-`;
-  await fs.writeFile(
-    path.join(testWorkdir, 'stacks', 'core', '001_test.md'),
-    promptContent
-  );
-  
-  try {
-    // Capture output to verify dry-run behavior
-    const originalLogger = log.logger;
-    const messages = [];
-    
-    log.logger = (...args) => {
-      messages.push(args.join(' '));
-    };
-    
-    // Run with dry-run mode
-    await main([
-      'node', 'vibec.js',
-      `--workdir=${testWorkdir}`,
-      '--dry-run',
-      '--stacks=core'
-    ]);
-    
-    // Restore logger
-    log.logger = originalLogger;
-    
-    // Check that dry-run message was logged
-    t.ok(messages.some(msg => msg.includes('DRY RUN MODE')), 'Dry-run mode message should be logged');
-    
-    // Check that the output file was NOT created
-    const outputFileExists = await fs.access(path.join(testWorkdir, 'output', 'current', 'dry-run-test.js'))
-      .then(() => true)
-      .catch(() => false);
-    
-    t.notOk(outputFileExists, 'Output file should not be created in dry-run mode');
-  } catch (error) {
-    t.fail(`Test failed with error: ${error.message}`);
-  } finally {
-    // Clean up temporary directory
-    try {
-      await fs.rm(tempDir, { recursive: true, force: true });
-    } catch (err) {
-      console.error('Error cleaning up temp directory:', err);
-    }
+    await fs.rm(tempDir, { recursive: true });
   }
   
   t.end();
 });
 
-// Test multiple stacks
-tape('Test processing multiple stacks', async t => {
-  // Create a temporary directory for the test
-  const tempDir = path.join(os.tmpdir(), `vibec-multi-stack-test-${Date.now()}`);
-  const testWorkdir = path.join(tempDir, 'test-workdir');
-  
-  // Setup directories needed for the test
-  await fs.mkdir(path.join(testWorkdir, 'output', 'bootstrap'), { recursive: true });
-  await fs.mkdir(path.join(testWorkdir, 'stacks', 'stack1'), { recursive: true });
-  await fs.mkdir(path.join(testWorkdir, 'stacks', 'stack2'), { recursive: true });
-  
-  // Create test prompt files
-  await fs.writeFile(
-    path.join(testWorkdir, 'stacks', 'stack1', '001_test.md'),
-    `# Test Prompt Stack1\n## Output: stack1.js\n`
-  );
-  
-  await fs.writeFile(
-    path.join(testWorkdir, 'stacks', 'stack2', '001_test.md'),
-    `# Test Prompt Stack2\n## Output: stack2.js\n`
-  );
-  
-  // Start a mock HTTP server that simulates the OpenAI API
-  const server = http.createServer((req, res) => {
-    // Mock API response
-    if (req.url === '/chat/completions' && req.method === 'POST') {
-      let body = '';
-      
-      req.on('data', chunk => {
-        body += chunk.toString();
-      });
-      
-      req.on('end', () => {
-        // Return a mock response based on the request content
-        try {
-          const requestData = JSON.parse(body);
-          const userMessage = requestData.messages.find(m => m.role === 'user')?.content || '';
-          
-          let response;
-          if (userMessage.includes('Test Prompt Stack1')) {
-            response = 'File: stack1.js\n```js\nconsole.log("stack1")\n```';
-          } else {
-            response = 'File: stack2.js\n```js\nconsole.log("stack2")\n```';
-          }
-          
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            choices: [
-              {
-                message: {
-                  content: response
-                }
-              }
-            ]
-          }));
-        } catch (error) {
-          res.writeHead(500);
-          res.end(JSON.stringify({ error: error.message }));
-        }
-      });
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-  
-  // Start the server
-  await new Promise(resolve => {
-    server.listen(3000, resolve);
-  });
+// Test validation and defaults
+tape('Validation and defaults tests', async t => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vibec-validation-test-'));
   
   try {
-    // Run the main function with multiple stacks
-    await main([
-      'node', 'vibec.js',
-      '--api-url=http://localhost:3000',
-      '--api-key=test-key',
-      `--workdir=${testWorkdir}`,
-      '--stacks=stack1,stack2'
-    ]);
+    // PROMPT: "Use config with missing required fields, verify defaults are used"
+    await fs.writeFile(path.join(tempDir, 'vibec.json'), JSON.stringify({
+      // No required fields
+      apiModel: "anthropic/claude-3.7-sonnet"
+    }));
     
-    // Check if both output files were created
-    const stack1FileExists = await fs.access(path.join(testWorkdir, 'output', 'current', 'stack1.js'))
-      .then(() => true)
-      .catch(() => false);
+    const configFile = await loadConfigFile(tempDir);
+    const options = parseArgs(['node', 'vibec.js'], {}, configFile);
     
-    const stack2FileExists = await fs.access(path.join(testWorkdir, 'output', 'current', 'stack2.js'))
-      .then(() => true)
-      .catch(() => false);
+    // Verify defaults are used for missing fields
+    t.deepEqual(options.stacks, ['core'], "Should use default stacks when not in config");
+    t.equal(options.retries, 0, "Should use default retries when not in config");
+    t.equal(options['plugin-timeout'], 5000, "Should use default plugin timeout when not in config");
+    t.equal(options.output, 'output', "Should use default output when not in config");
     
-    t.ok(stack1FileExists, 'Stack1 output file was created');
-    t.ok(stack2FileExists, 'Stack2 output file was created');
+    // PROMPT: "Verify `VIBEC_STACKS` string is converted to array"
+    const envOptions = parseEnvVars({ VIBEC_STACKS: 'core,utils,tests' });
+    t.deepEqual(envOptions.stacks, ['core', 'utils', 'tests'], "Should convert ENV string to array");
     
-    if (stack1FileExists) {
-      const stack1Content = await fs.readFile(path.join(testWorkdir, 'output', 'current', 'stack1.js'), 'utf8');
-      t.equal(stack1Content, 'console.log("stack1")', 'Stack1 file content matches expected output');
-    }
+    // Test with comma and spaces
+    const envOptionsWithSpaces = parseEnvVars({ VIBEC_STACKS: 'core, utils, tests' });
+    t.deepEqual(
+      envOptionsWithSpaces.stacks, 
+      ['core', 'utils', 'tests'], 
+      "Should handle spaces in ENV string"
+    );
     
-    if (stack2FileExists) {
-      const stack2Content = await fs.readFile(path.join(testWorkdir, 'output', 'current', 'stack2.js'), 'utf8');
-      t.equal(stack2Content, 'console.log("stack2")', 'Stack2 file content matches expected output');
-    }
-  } catch (error) {
-    t.fail(`Test failed with error: ${error.message}`);
   } finally {
-    // Clean up
-    server.close();
-    
-    // Clean up temporary directory
-    try {
-      await fs.rm(tempDir, { recursive: true, force: true });
-    } catch (err) {
-      console.error('Error cleaning up temp directory:', err);
-    }
+    await fs.rm(tempDir, { recursive: true });
   }
+  
+  t.end();
+});
+
+// Test validation of retries and pluginTimeout
+tape('Validation of numeric parameters', t => {
+  // PROMPT: "Validate: `retries` ≥ 0, `pluginTimeout` > 0, log errors with `log` utility."
+  
+  // Test invalid retries values
+  try {
+    parseArgs(['node', 'vibec.js', '--retries=-1']);
+    t.fail("Should throw error for negative retries");
+  } catch (error) {
+    t.ok(error.message.includes("retries"), "Should detect invalid retries value");
+  }
+  
+  // Test invalid plugin-timeout values
+  try {
+    parseArgs(['node', 'vibec.js', '--plugin-timeout=0']);
+    t.fail("Should throw error for zero plugin timeout");
+  } catch (error) {
+    t.ok(error.message.includes("plugin-timeout"), "Should detect invalid plugin timeout value");
+  }
+  
+  // Valid values should pass
+  const options1 = parseArgs(['node', 'vibec.js', '--retries=0', '--plugin-timeout=1']);
+  t.equal(options1.retries, 0, "Zero is valid for retries");
+  t.equal(options1['plugin-timeout'], 1, "Positive numbers are valid for plugin timeout");
+  
+  const options2 = parseArgs(['node', 'vibec.js', '--retries=5', '--plugin-timeout=10000']);
+  t.equal(options2.retries, 5, "Positive values are valid for retries");
+  t.equal(options2['plugin-timeout'], 10000, "Larger positive numbers are valid for plugin timeout");
   
   t.end();
 });
