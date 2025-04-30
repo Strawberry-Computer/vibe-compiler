@@ -3,9 +3,8 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import https from 'https';
-import { execSync, spawn } from 'child_process';
+import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 
 /**
  * Colored logging utility
@@ -47,89 +46,30 @@ export const log = {
   }
 };
 
-/**
- * Display help message
- */
-export async function showHelp() {
-  console.log(`
-Usage: vibec [options]
-
-Options:
-  --workdir=<dir>           Working directory (default: '.')
-  --stacks=<stack1,stack2>  Comma-separated list of stacks to process (default: 'core')
-  --dry-run                 Run without making any changes (default: false)
-  --start=<number>          Start at specific prompt number
-  --end=<number>            End at specific prompt number
-  --api-url=<url>           API URL (default: 'https://openrouter.ai/api/v1')
-  --api-key=<key>           API key (required)
-  --api-model=<model>       API model (default: 'anthropic/claude-3.7-sonnet')
-  --test-cmd=<command>      Command to run tests
-  --retries=<number>        Number of times to retry API calls (default: 0)
-  --plugin-timeout=<number> Timeout for plugins in milliseconds (default: 5000)
-  --output=<dir>            Output directory (default: 'output')
-  --iterations=<number>     Number of times to retry a stage on test failure (default: 2)
-  --help                    Show this help message
-  --version                 Show version information
-`);
-}
-
-/**
- * Display version information
- */
-export async function showVersion() {
-  try {
-    // Get package.json path relative to current file
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = dirname(__filename);
-    const packageJsonPath = path.join(__dirname, '..', 'package.json');
-    
-    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf8'));
-    console.log(`vibec v${packageJson.version || '0.0.0'}`);
-  } catch (error) {
-    console.error('Unable to determine version:', error.message);
-  }
-}
-
-/**
- * Load config file from the working directory
- * @param {string} workdir - Working directory 
- * @returns {Promise<Object>} Parsed config or empty object
- */
+// PROMPT: "Load `vibec.json` from root if present, parse as JSON. IMPORTANT: Throw error if malformed JSON. Don't throw error when no config file is present."
 export async function loadConfig(workdir) {
   try {
     const configPath = path.join(workdir, 'vibec.json');
+    const configData = await fs.readFile(configPath, 'utf8');
     
-    // Check if config file exists
     try {
-      await fs.access(configPath);
-    } catch {
-      // No config file, return empty object
-      return {};
-    }
-    
-    // Read and parse config file
-    const configContent = await fs.readFile(configPath, 'utf8');
-    try {
-      return JSON.parse(configContent);
+      return JSON.parse(configData);
     } catch (error) {
-      throw new Error(`Failed to parse vibec.json: ${error.message}`);
+      throw new Error(`Invalid JSON in vibec.json: ${error.message}`);
     }
   } catch (error) {
-    // Let errors propagate
-    throw error;
+    // Only throw if it's not a file not found error
+    if (error.code !== 'ENOENT') {
+      throw error;
+    }
+    return null;
   }
 }
 
-/**
- * Parse command line arguments and merge with env vars and config file
- * @param {string[]} argv - Command line arguments
- * @param {Object} env - Environment variables
- * @param {Object} configFile - Config file contents
- * @returns {Object} Parsed options
- */
-export function parseArgs(argv, env = {}, configFile = {}) {
+// PROMPT: "Update `parseArgs` to handle `vibec.json` and merge with CLI and env vars. It should take `process.env` and `vibecJson` as arguments in addition to `process.argv`."
+export function parseArgs(argv, env = {}, vibecJson = null) {
   // Default options
-  const defaults = {
+  const options = {
     workdir: '.',
     stacks: ['core'],
     'dry-run': false,
@@ -142,57 +82,51 @@ export function parseArgs(argv, env = {}, configFile = {}) {
     retries: 0,
     'plugin-timeout': 5000,
     output: 'output',
-    iterations: 2
+    help: false,
+    version: false,
+    iterations: 2  // PROMPT: "Add support for iterations, default 2"
   };
 
-  // Map config file keys to CLI option keys
-  const configOptions = {
-    workdir: configFile.workdir,
-    stacks: configFile.stacks,
-    'dry-run': configFile.dryRun,
-    start: configFile.start,
-    end: configFile.end,
-    'api-url': configFile.apiUrl,
-    'api-key': configFile.apiKey,
-    'api-model': configFile.apiModel,
-    'test-cmd': configFile.testCmd,
-    retries: configFile.retries,
-    'plugin-timeout': configFile.pluginTimeout,
-    output: configFile.output,
-    iterations: configFile.iterations
-  };
-
-  // Get options from environment variables
-  const envOptions = {
-    workdir: env.VIBEC_WORKDIR,
-    stacks: env.VIBEC_STACKS ? env.VIBEC_STACKS.split(',') : undefined,
-    'dry-run': env.VIBEC_DRY_RUN === 'true' ? true : 
-               env.VIBEC_DRY_RUN === 'false' ? false : undefined,
-    start: env.VIBEC_START !== undefined ? parseInt(env.VIBEC_START, 10) : undefined,
-    end: env.VIBEC_END !== undefined ? parseInt(env.VIBEC_END, 10) : undefined,
-    'api-url': env.VIBEC_API_URL,
-    'api-key': env.VIBEC_API_KEY,
-    'api-model': env.VIBEC_API_MODEL,
-    'test-cmd': env.VIBEC_TEST_CMD,
-    retries: env.VIBEC_RETRIES !== undefined ? parseInt(env.VIBEC_RETRIES, 10) : undefined,
-    'plugin-timeout': env.VIBEC_PLUGIN_TIMEOUT !== undefined ? 
-                     parseInt(env.VIBEC_PLUGIN_TIMEOUT, 10) : undefined,
-    output: env.VIBEC_OUTPUT,
-    iterations: env.VIBEC_ITERATIONS !== undefined ? parseInt(env.VIBEC_ITERATIONS, 10) : undefined
-  };
-
-  // Get options from CLI arguments
-  const cliOptions = {};
-
-  // Handle special flags first
-  if (argv.includes('--help')) {
-    return { help: true, ...defaults };
-  }
-  
-  if (argv.includes('--version')) {
-    return { version: true, ...defaults };
+  // PROMPT: "Merge options with existing CLI args and env vars, using defaults only for unset values."
+  // Apply config from vibec.json if present
+  if (vibecJson) {
+    if (vibecJson.workdir !== undefined) options.workdir = vibecJson.workdir;
+    if (vibecJson.stacks !== undefined) options.stacks = vibecJson.stacks;
+    if (vibecJson.dryRun !== undefined) options['dry-run'] = vibecJson.dryRun;
+    if (vibecJson.start !== undefined) options.start = vibecJson.start;
+    if (vibecJson.end !== undefined) options.end = vibecJson.end;
+    if (vibecJson.apiUrl !== undefined) options['api-url'] = vibecJson.apiUrl;
+    if (vibecJson.apiKey !== undefined) options['api-key'] = vibecJson.apiKey;
+    if (vibecJson.apiModel !== undefined) options['api-model'] = vibecJson.apiModel;
+    if (vibecJson.testCmd !== undefined) options['test-cmd'] = vibecJson.testCmd;
+    if (vibecJson.retries !== undefined) options.retries = vibecJson.retries;
+    if (vibecJson.pluginTimeout !== undefined) options['plugin-timeout'] = vibecJson.pluginTimeout;
+    if (vibecJson.output !== undefined) options.output = vibecJson.output;
+    if (vibecJson.iterations !== undefined) options.iterations = vibecJson.iterations;
   }
 
+  // PROMPT: "Merge options with existing CLI args and env vars, using defaults only for unset values."
+  // Apply environment variables
+  if (env.VIBEC_WORKDIR) options.workdir = env.VIBEC_WORKDIR;
+  if (env.VIBEC_STACKS) {
+    // PROMPT: "Convert `VIBEC_STACKS` to array if string."
+    options.stacks = env.VIBEC_STACKS.split(',').map(s => s.trim());
+  }
+  if (env.VIBEC_DRY_RUN !== undefined) {
+    options['dry-run'] = env.VIBEC_DRY_RUN.toLowerCase() === 'true';
+  }
+  if (env.VIBEC_START) options.start = parseInt(env.VIBEC_START, 10);
+  if (env.VIBEC_END) options.end = parseInt(env.VIBEC_END, 10);
+  if (env.VIBEC_API_URL) options['api-url'] = env.VIBEC_API_URL;
+  if (env.VIBEC_API_KEY) options['api-key'] = env.VIBEC_API_KEY;
+  if (env.VIBEC_API_MODEL) options['api-model'] = env.VIBEC_API_MODEL;
+  if (env.VIBEC_TEST_CMD) options['test-cmd'] = env.VIBEC_TEST_CMD;
+  if (env.VIBEC_RETRIES) options.retries = parseInt(env.VIBEC_RETRIES, 10);
+  if (env.VIBEC_PLUGIN_TIMEOUT) options['plugin-timeout'] = parseInt(env.VIBEC_PLUGIN_TIMEOUT, 10);
+  if (env.VIBEC_OUTPUT) options.output = env.VIBEC_OUTPUT;
+  if (env.VIBEC_ITERATIONS) options.iterations = parseInt(env.VIBEC_ITERATIONS, 10);
+
+  // Parse command line arguments (highest priority)
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
     
@@ -200,22 +134,45 @@ export function parseArgs(argv, env = {}, configFile = {}) {
     if (arg.startsWith('--') && arg.includes('=')) {
       const [key, value] = arg.slice(2).split('=');
       
-      if (key === 'stacks') {
-        cliOptions[key] = value.split(',');
+      if (key === 'retries') {
+        const retries = parseInt(value, 10);
+        if (isNaN(retries) || retries < 0) {
+          throw new Error(`Invalid retries value: ${value}. Must be a non-negative integer.`);
+        }
+        options[key] = retries;
+      } else if (key === 'plugin-timeout') {
+        const timeout = parseInt(value, 10);
+        if (isNaN(timeout) || timeout <= 0) {
+          throw new Error(`Invalid plugin-timeout value: ${value}. Must be a positive integer.`);
+        }
+        options[key] = timeout;
+      } else if (key === 'iterations') {
+        const iterations = parseInt(value, 10);
+        if (isNaN(iterations) || iterations < 0) {
+          throw new Error(`Invalid iterations value: ${value}. Must be a non-negative integer.`);
+        }
+        options[key] = iterations;
+      } else if (key === 'stacks') {
+        options[key] = value.split(',');
       } else if (key === 'dry-run') {
-        cliOptions[key] = value.toLowerCase() !== 'false';
-      } else if (key === 'start' || key === 'end' || key === 'retries' || key === 'plugin-timeout' || key === 'iterations') {
-        cliOptions[key] = value ? parseInt(value, 10) : null;
+        options[key] = value.toLowerCase() !== 'false';
+      } else if (key === 'start' || key === 'end') {
+        options[key] = value ? parseInt(value, 10) : null;
       } else {
-        cliOptions[key] = value;
+        options[key] = value;
       }
     }
     // Handle --option value syntax
     else if (arg.startsWith('--')) {
       const key = arg.slice(2);
       
+      if (key === 'help' || key === 'version') {
+        options[key] = true;
+        continue;
+      }
+      
       if (key === 'dry-run') {
-        cliOptions[key] = true;
+        options[key] = true;
         continue;
       }
       
@@ -224,56 +181,114 @@ export function parseArgs(argv, env = {}, configFile = {}) {
         const value = argv[i + 1];
         i++; // Skip the next argument since we've consumed it
         
-        if (key === 'stacks') {
-          cliOptions[key] = value.split(',');
-        } else if (key === 'start' || key === 'end' || key === 'retries' || key === 'plugin-timeout' || key === 'iterations') {
-          cliOptions[key] = value ? parseInt(value, 10) : null;
+        if (key === 'retries') {
+          const retries = parseInt(value, 10);
+          if (isNaN(retries) || retries < 0) {
+            throw new Error(`Invalid retries value: ${value}. Must be a non-negative integer.`);
+          }
+          options[key] = retries;
+        } else if (key === 'plugin-timeout') {
+          const timeout = parseInt(value, 10);
+          if (isNaN(timeout) || timeout <= 0) {
+            throw new Error(`Invalid plugin-timeout value: ${value}. Must be a positive integer.`);
+          }
+          options[key] = timeout;
+        } else if (key === 'iterations') {
+          const iterations = parseInt(value, 10);
+          if (isNaN(iterations) || iterations < 0) {
+            throw new Error(`Invalid iterations value: ${value}. Must be a non-negative integer.`);
+          }
+          options[key] = iterations;
+        } else if (key === 'stacks') {
+          options[key] = value.split(',');
+        } else if (key === 'start' || key === 'end') {
+          options[key] = value ? parseInt(value, 10) : null;
         } else {
-          cliOptions[key] = value;
+          options[key] = value;
         }
       } else {
         // Flag without value
-        cliOptions[key] = true;
+        options[key] = true;
       }
     }
   }
   
-  // Merge options with precedence: CLI > env > config > defaults
-  const options = { ...defaults };
-  
-  for (const key in defaults) {
-    if (configOptions[key] !== undefined) {
-      options[key] = configOptions[key];
-    }
-    if (envOptions[key] !== undefined) {
-      options[key] = envOptions[key];
-    }
-    if (cliOptions[key] !== undefined) {
-      options[key] = cliOptions[key];
-    }
-  }
-
-  // Add special flags if present
-  if (cliOptions.help) options.help = true;
-  if (cliOptions.version) options.version = true;
-  
-  // Validate options
+  // PROMPT: "Validate: `retries` ≥ 0, `pluginTimeout` > 0, log errors with `log` utility."
+  // Final validation
   if (options.retries < 0) {
-    log.error(`Invalid value for retries: ${options.retries}. Must be a non-negative integer.`);
-    throw new Error(`Invalid value for retries: ${options.retries}. Must be a non-negative integer.`);
+    log.error(`Invalid retries value: ${options.retries}. Must be a non-negative integer.`);
+    throw new Error(`Invalid retries value: ${options.retries}. Must be a non-negative integer.`);
   }
   
   if (options['plugin-timeout'] <= 0) {
-    log.error(`Invalid value for plugin-timeout: ${options['plugin-timeout']}. Must be a positive integer.`);
-    throw new Error(`Invalid value for plugin-timeout: ${options['plugin-timeout']}. Must be a positive integer.`);
+    log.error(`Invalid plugin-timeout value: ${options['plugin-timeout']}. Must be a positive integer.`);
+    throw new Error(`Invalid plugin-timeout value: ${options['plugin-timeout']}. Must be a positive integer.`);
   }
-  
+
   if (options.iterations < 0) {
-    log.error(`Invalid value for iterations: ${options.iterations}. Must be a non-negative integer.`);
-    throw new Error(`Invalid value for iterations: ${options.iterations}. Must be a non-negative integer.`);
+    log.error(`Invalid iterations value: ${options.iterations}. Must be a non-negative integer.`);
+    throw new Error(`Invalid iterations value: ${options.iterations}. Must be a non-negative integer.`);
   }
   
   return options;
+}
+
+/**
+ * Show the help message
+ */
+export function showHelp() {
+  console.log(`
+Usage: vibec [options]
+
+Options:
+  --workdir=<dir>         Working directory (default: .)
+  --stacks=<stack1,stack2> Stacks to process (default: core)
+  --dry-run               Run without making actual API calls or file changes
+  --start=<number>        Start processing from this prompt number
+  --end=<number>          End processing at this prompt number
+  --api-url=<url>         API URL (default: https://openrouter.ai/api/v1)
+  --api-key=<key>         API key for LLM service
+  --api-model=<model>     API model to use (default: anthropic/claude-3.7-sonnet)
+  --test-cmd=<command>    Command to run tests
+  --retries=<number>      Number of retries for failed LLM requests (default: 0)
+  --plugin-timeout=<ms>   Timeout for plugin execution in ms (default: 5000)
+  --output=<dir>          Output directory (default: output)
+  --iterations=<number>   Number of times to attempt a stage if tests fail (default: 2)
+  --help                  Show this help message and exit
+  --version               Show version information and exit
+
+Environment variables:
+  VIBEC_WORKDIR           Working directory path
+  VIBEC_STACKS            Comma-separated stacks
+  VIBEC_DRY_RUN           true/false
+  VIBEC_START             Numeric stage value
+  VIBEC_END               Numeric stage value
+  VIBEC_API_URL           URL string
+  VIBEC_API_KEY           API key string
+  VIBEC_API_MODEL         Model string
+  VIBEC_TEST_CMD          Command string
+  VIBEC_RETRIES           Integer string
+  VIBEC_PLUGIN_TIMEOUT    Integer string
+  VIBEC_OUTPUT            Output directory string
+  VIBEC_ITERATIONS        Integer string
+
+Configuration file: vibec.json in the working directory
+  `);
+}
+
+/**
+ * Show the version information
+ */
+export async function showVersion() {
+  try {
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const packageJsonPath = path.resolve(__dirname, '..', '..', '..', 'package.json');
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf8'));
+    console.log(`vibec v${packageJson.version}`);
+  } catch (error) {
+    console.error('Error reading version information:', error.message);
+    process.exit(1);
+  }
 }
 
 /**
@@ -309,13 +324,86 @@ export async function getPromptFiles(workdir, stacks) {
   return results.sort((a, b) => a.number - b.number);
 }
 
+// PROMPT: "Scan for `.js` files and execute as async functions in alphabetical order with 5000ms timeout"
+export async function loadJsPlugins(workdir, stack, config, promptNumber, promptContent, outputCurrentPath, pluginTimeout = 5000) {
+  const pluginsDir = path.join(workdir, 'stacks', stack, 'plugins');
+  
+  try {
+    // Check if plugins directory exists
+    try {
+      await fs.access(pluginsDir);
+    } catch {
+      // No plugins directory
+      return '';
+    }
+    
+    // Get all .js files in the plugins directory
+    const files = await fs.readdir(pluginsDir);
+    const jsPluginFiles = files
+      .filter(file => file.endsWith('.js'))
+      .sort(); // Sort alphabetically
+    
+    if (jsPluginFiles.length === 0) {
+      return '';
+    }
+    
+    log.debug(`Found ${jsPluginFiles.length} JavaScript plugins in ${stack}`);
+    
+    // Load and execute each plugin
+    for (const file of jsPluginFiles) {
+      const filePath = path.join(pluginsDir, file);
+      try {
+        log.info(`Loading JavaScript plugin: ${stack}/${file}`);
+        
+        // Dynamically import the plugin
+        const pluginModule = await import(`file://${filePath}`);
+        const pluginFn = pluginModule.default || pluginModule;
+        
+        if (typeof pluginFn !== 'function') {
+          log.error(`Plugin ${file} does not export a function`);
+          continue;
+        }
+        
+        // Create plugin context object
+        const context = {
+          config,
+          stack,
+          promptNumber,
+          promptContent,
+          workingDir: outputCurrentPath
+        };
+        
+        // Execute plugin with timeout
+        log.debug(`Executing plugin ${file}`);
+        await Promise.race([
+          pluginFn(context),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error(`Plugin ${file} timed out after ${pluginTimeout}ms`)), pluginTimeout)
+          )
+        ]);
+        
+        log.info(`Successfully executed plugin: ${stack}/${file}`);
+      } catch (error) {
+        // Log error but continue with next plugin
+        log.error(`Error executing plugin ${file}: ${error.message}`);
+      }
+    }
+    
+    return '';
+  } catch (error) {
+    log.warn(`Warning: Error loading JavaScript plugins for stack ${stack}: ${error.message}`);
+    return '';
+  }
+}
+
 /**
- * Load Markdown plugins for a stack
+ * Load plugins for a stack
  * @param {string} workdir - Working directory
  * @param {string} stack - Stack name
+ * @param {number} pluginTimeout - Plugin timeout in milliseconds
  * @returns {Promise<string>} Concatenated plugin content
  */
-export async function loadPlugins(workdir, stack) {
+export async function loadPlugins(workdir, stack, pluginTimeout = 5000) {
   const pluginsDir = path.join(workdir, 'stacks', stack, 'plugins');
   let pluginContent = '';
   
@@ -354,102 +442,15 @@ export async function loadPlugins(workdir, stack) {
 }
 
 /**
- * Load and execute dynamic JavaScript plugins for a stack
- * @param {string} workdir - Working directory
- * @param {string} stack - Stack name
- * @param {number} promptNumber - Prompt number
- * @param {string} promptContent - Content of the prompt
- * @param {string} outputDir - Output directory
- * @param {Object} config - Configuration object
- * @param {number} timeout - Plugin execution timeout in milliseconds
- * @returns {Promise<void>}
- */
-export async function loadAndExecuteDynamicPlugins(workdir, stack, promptNumber, promptContent, outputDir, config, timeout) {
-  const pluginsDir = path.join(workdir, 'stacks', stack, 'plugins');
-  
-  try {
-    // Check if plugins directory exists
-    try {
-      await fs.access(pluginsDir);
-    } catch {
-      // No plugins directory, return
-      return;
-    }
-    
-    // Get all .js files in the plugins directory
-    const files = await fs.readdir(pluginsDir);
-    const pluginFiles = files
-      .filter(file => file.endsWith('.js'))
-      .sort(); // Sort alphabetically
-    
-    if (pluginFiles.length === 0) {
-      return;
-    }
-    
-    // Build context object for plugins
-    const pluginContext = {
-      config,
-      stack,
-      promptNumber,
-      promptContent,
-      workingDir: path.join(workdir, outputDir, 'current')
-    };
-    
-    // Execute each plugin with timeout
-    for (const file of pluginFiles) {
-      const filePath = path.join(pluginsDir, file);
-      log.info(`Loading dynamic plugin: ${stack}/${file}`);
-      
-      try {
-        // Import the plugin
-        const pluginModule = await import(`file://${filePath}`);
-        
-        // Execute the plugin with timeout
-        log.debug(`Executing dynamic plugin: ${stack}/${file}`);
-        await Promise.race([
-          (async () => {
-            try {
-              // If default export is a function, call it
-              if (typeof pluginModule.default === 'function') {
-                await pluginModule.default(pluginContext);
-              }
-              // Otherwise, try to find and call a named export
-              else if (typeof pluginModule.execute === 'function') {
-                await pluginModule.execute(pluginContext);
-              } else {
-                log.warn(`Warning: Plugin ${file} does not export a default or execute function`);
-              }
-            } catch (pluginError) {
-              throw pluginError;
-            }
-          })(),
-          new Promise((_, reject) => {
-            setTimeout(() => {
-              reject(new Error(`Plugin execution timed out after ${timeout}ms`));
-            }, timeout);
-          })
-        ]);
-        
-        log.debug(`Successfully executed plugin: ${stack}/${file}`);
-      } catch (error) {
-        log.error(`Error executing plugin ${file}: ${error.message}`);
-        // Continue with next plugin on error
-      }
-    }
-  } catch (error) {
-    log.warn(`Warning: Error loading dynamic plugins for stack ${stack}: ${error.message}`);
-  }
-}
-
-/**
  * Build a prompt from a file and context
  * @param {string} filePath - Path to prompt file
  * @param {string} workdir - Working directory
  * @param {string} outputDir - Output directory
- * @param {string} [testOutput] - Output from test execution
+ * @param {number} pluginTimeout - Plugin timeout in milliseconds
+ * @param {string} testOutput - Test output to include in context (optional)
  * @returns {Promise<string>} Assembled prompt
  */
-export async function buildPrompt(filePath, workdir, outputDir, testOutput = null) {
+export async function buildPrompt(filePath, workdir, outputDir, pluginTimeout, testOutput = '') {
   const promptContent = await fs.readFile(filePath, 'utf8');
   
   // Extract context files
@@ -475,19 +476,18 @@ export async function buildPrompt(filePath, workdir, outputDir, testOutput = nul
   let pluginContent = '';
   if (stackMatch) {
     const stack = stackMatch[1];
-    pluginContent = await loadPlugins(workdir, stack);
+    pluginContent = await loadPlugins(workdir, stack, pluginTimeout);
   }
 
-  // Add test output if provided
-  let testFeedback = '';
+  // Add test output to context if provided
   if (testOutput) {
-    testFeedback = `\n\n## Test Output\nThe previous implementation failed tests. Please fix the issues:\n\`\`\`\n${testOutput}\n\`\`\`\n`;
+    contextContent += `\nTest Output:\n\`\`\`\n${testOutput}\n\`\`\`\n`;
   }
 
   // Assemble prompt sandwich
   const systemMessage = 'Generate code files in this exact format for each file: "File: path/to/file\n```lang\ncontent\n```". Ensure every response includes ALL files requested in the prompt\'s ## Output: sections. Do not skip any requested outputs.';
   
-  return `${systemMessage}\n\n${promptContent}${testFeedback}${pluginContent}\n\n${contextContent}\n\n${systemMessage}\n\n${promptContent}${testFeedback}${pluginContent}`;
+  return `${systemMessage}\n\n${promptContent}${pluginContent}\n\n${contextContent}\n\n${systemMessage}\n\n${promptContent}${pluginContent}`;
 }
 
 /**
@@ -510,19 +510,13 @@ export async function processLlm(prompt, options) {
   const apiUrl = options['api-url'];
   const apiKey = options['api-key'];
   const model = options['api-model'];
-  const maxRetries = options.retries || 0;
+  const maxRetries = options.retries;
 
   log.info(`Sending request to ${apiUrl} with model ${model}`);
 
-  let attempts = 0;
-  let lastError = null;
-
-  while (attempts <= maxRetries) {
+  let retries = 0;
+  while (true) {
     try {
-      if (attempts > 0) {
-        log.info(`Retry attempt ${attempts}/${maxRetries}`);
-      }
-
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -552,21 +546,18 @@ export async function processLlm(prompt, options) {
       const data = await response.json();
       return data.choices[0].message.content;
     } catch (error) {
-      lastError = error;
-      log.error(`Error processing LLM request (attempt ${attempts + 1}/${maxRetries + 1}):`, error);
-      attempts++;
-      
-      if (attempts <= maxRetries) {
-        // Wait before retrying (exponential backoff)
-        const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
-        log.info(`Waiting ${delay}ms before retry...`);
+      retries++;
+      if (retries <= maxRetries) {
+        log.warn(`Attempt ${retries}/${maxRetries} failed. Retrying...`);
+        // Add exponential backoff
+        const delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
         await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        log.error('Error processing LLM request after retries:', error);
+        throw error;
       }
     }
   }
-
-  // If we've exhausted all retries
-  throw lastError || new Error('Failed to process LLM request after all retry attempts');
 }
 
 /**
@@ -590,51 +581,27 @@ export function parseResponse(response) {
 }
 
 /**
- * Run tests with the provided command and capture output
+ * Run tests with the provided command
  * @param {string} testCmd - Test command to run
- * @returns {Promise<{success: boolean, output: string}>} Test results
+ * @returns {Promise<{success: boolean, output: string}>}
  */
-export function runTestsWithCapture(testCmd) {
+export function runTests(testCmd) {
   if (!testCmd) return { success: true, output: '' };
   
   log.info(`Running tests: ${testCmd}`);
-  
-  return new Promise((resolve) => {
-    // Split the command into the program and its arguments
-    const parts = testCmd.split(' ');
-    const cmd = parts[0];
-    const args = parts.slice(1);
-    
-    const process = spawn(cmd, args, { shell: true });
-    
-    let stdout = '';
-    let stderr = '';
-    
-    process.stdout.on('data', (data) => {
-      stdout += data;
+  try {
+    // PROMPT: "Capture stdout and stderr from the test command execution."
+    const output = execSync(testCmd, { 
+      stdio: ['inherit', 'pipe', 'pipe'],
+      encoding: 'utf8'
     });
-    
-    process.stderr.on('data', (data) => {
-      stderr += data;
-    });
-    
-    process.on('close', (code) => {
-      const output = stdout + (stderr ? '\n' + stderr : '');
-      
-      if (code === 0) {
-        log.success('Tests completed successfully');
-        resolve({ success: true, output });
-      } else {
-        log.error(`Tests failed with exit code ${code}`);
-        resolve({ success: false, output });
-      }
-    });
-    
-    process.on('error', (err) => {
-      log.error(`Failed to run tests: ${err.message}`);
-      resolve({ success: false, output: err.message });
-    });
-  });
+    log.success('Tests completed successfully');
+    return { success: true, output };
+  } catch (error) {
+    const output = error.stdout + (error.stderr || '');
+    log.error('Tests failed');
+    return { success: false, output };
+  }
 }
 
 /**
@@ -698,9 +665,9 @@ export async function initializeOutputCurrent(workdir, outputDir) {
     
     // Copy bootstrap files to current directory
     await copyDirectory(bootstrapDir, currentDir);
-    log.success(`Initialized ${outputDir}/current with bootstrap files`);
+    log.success('Initialized output/current with bootstrap files');
   } catch (error) {
-    log.error(`Error initializing ${outputDir}/current:`, error);
+    log.error('Error initializing output/current:', error);
     throw error;
   }
 }
@@ -789,86 +756,66 @@ export async function copyGeneratedFiles(workdir, startStage, outputDir) {
 }
 
 /**
- * Process a single prompt file with support for iterations on test failures
+ * Process a single prompt file
  * @param {Object} promptFile - Prompt file object
- * @param {Object} options - Command line options
- * @param {string} outputDir - Output directory
- * @returns {Promise<void>}
+ * @param {Object} options - CLI options
+ * @param {string} testOutput - Test output from previous iteration (optional)
+ * @returns {Promise<{success: boolean, output: string}>}
  */
-export async function processPromptFile(promptFile, options, outputDir) {
-  log.info(`Processing: ${promptFile.file} (${promptFile.number})`);
+export async function processPromptFile(promptFile, options, vibecJson, testOutput = '') {
+  log.info(`Processing: ${promptFile.file} (${promptFile.number})${testOutput ? ' with test feedback' : ''}`);
   
-  let iterationCount = 0;
-  let maxIterations = options.iterations;
-  let testOutput = null;
-  let success = false;
-  
-  // Get prompt content for potential plugins
   const promptContent = await fs.readFile(promptFile.file, 'utf8');
+  const outputCurrentPath = path.join(options.workdir, options.output, 'current');
   
-  // Load config for plugin context
-  const config = await loadConfig(options.workdir);
-  
-  // Run dynamic plugins before prompt processing
-  await loadAndExecuteDynamicPlugins(
-    options.workdir,
-    promptFile.stack,
-    promptFile.number,
+  // PROMPT: "Execute as async functions in alphabetical order with 5000ms timeout"
+  // Run JS plugins before building the prompt
+  await loadJsPlugins(
+    options.workdir, 
+    promptFile.stack, 
+    vibecJson, 
+    promptFile.number, 
     promptContent,
-    outputDir,
-    config,
+    outputCurrentPath,
     options['plugin-timeout']
   );
-
-  while (iterationCount <= maxIterations && !success) {
-    // If this is not the first attempt, log the iteration
-    if (iterationCount > 0) {
-      log.info(`Iteration ${iterationCount}/${maxIterations} for ${promptFile.file}`);
-    }
-
-    // Build prompt, including test output for iterations after the first
-    const prompt = await buildPrompt(promptFile.file, options.workdir, outputDir, testOutput);
-    
-    // Process with LLM
-    const response = await processLlm(prompt, options);
-    
-    // Parse response
-    const files = parseResponse(response);
-    log.info(`Extracted ${files.length} files from LLM response`);
-    
-    // Write files unless in dry-run mode
-    if (!options['dry-run']) {
-      await writeFiles(files, options.workdir, promptFile.stack, promptFile.number, path.basename(promptFile.file), outputDir);
-      
-      // Run tests if test command is provided
-      if (options['test-cmd']) {
-        const testResult = await runTestsWithCapture(options['test-cmd']);
-        success = testResult.success;
-        
-        // If tests failed and we have iterations left
-        if (!success && iterationCount < maxIterations) {
-          testOutput = testResult.output;
-          iterationCount++;
-        } else {
-          // Either tests succeeded or we've exhausted iterations
-          if (success) {
-            log.success(`Tests passed${iterationCount > 0 ? ` after ${iterationCount} iteration(s)` : ''}`);
-          } else if (iterationCount === maxIterations) {
-            log.error(`Failed to resolve test failures after ${maxIterations} iterations`);
-          }
-          break;
-        }
-      } else {
-        // No test command, assume success and exit the loop
-        success = true;
-        break;
-      }
-    } else {
-      log.info('Dry run mode - files not written, skipping tests');
-      success = true;
-      break;
-    }
+  
+  // Build prompt with test output if available
+  const prompt = await buildPrompt(
+    promptFile.file, 
+    options.workdir, 
+    options.output, 
+    options['plugin-timeout'],
+    testOutput
+  );
+  
+  // Process with LLM
+  const response = await processLlm(prompt, options);
+  
+  // Parse response
+  const files = parseResponse(response);
+  log.info(`Extracted ${files.length} files from LLM response`);
+  
+  // Write files unless in dry-run mode
+  if (!options['dry-run']) {
+    await writeFiles(
+      files, 
+      options.workdir, 
+      promptFile.stack, 
+      promptFile.number, 
+      path.basename(promptFile.file), 
+      options.output
+    );
+  } else {
+    log.info('Dry run mode - files not written');
   }
+  
+  // Run tests if test command is provided
+  if (options['test-cmd']) {
+    return runTests(options['test-cmd']);
+  }
+  
+  return { success: true, output: '' };
 }
 
 /**
@@ -878,28 +825,17 @@ export async function processPromptFile(promptFile, options, outputDir) {
  */
 export async function main(argv) {
   try {
-    // Load configuration file
-    const workdirArg = argv.find(arg => arg.startsWith('--workdir='));
-    const workdir = workdirArg ? workdirArg.split('=')[1] : '.';
+    // PROMPT: "Load `vibec.json` from root if present, parse as JSON."
+    // Default workdir is current directory 
+    const initialWorkdir = '.';
+    const vibecJson = await loadConfig(initialWorkdir);
     
-    // Load config file from workdir
-    let configFile = {};
-    try {
-      configFile = await loadConfig(workdir);
-      if (Object.keys(configFile).length > 0) {
-        log.info('Loaded configuration from vibec.json');
-      }
-    } catch (error) {
-      log.error('Error loading vibec.json:', error);
-      throw error;
-    }
+    // Parse arguments, now also passing env vars and config
+    const options = parseArgs(argv, process.env, vibecJson);
     
-    // Parse arguments with config and env vars
-    const options = parseArgs(argv, process.env, configFile);
-    
-    // Handle special options first
+    // Check for help or version flags first
     if (options.help) {
-      await showHelp();
+      showHelp();
       return;
     }
     
@@ -923,29 +859,56 @@ export async function main(argv) {
     
     log.info(`Will process ${filteredPromptFiles.length} prompt files`);
     
-    const outputDir = options.output || 'output';
-    
     // Initialize output/current directory
-    await initializeOutputCurrent(options.workdir, outputDir);
+    await initializeOutputCurrent(options.workdir, options.output);
     
     // Copy generated files if needed
     if (options.start) {
-      await copyGeneratedFiles(options.workdir, options.start, outputDir);
+      await copyGeneratedFiles(options.workdir, options.start, options.output);
     }
     
-    // Process each prompt file
+    // Process each prompt file with iterations support
     for (const promptFile of filteredPromptFiles) {
-      await processPromptFile(promptFile, options, outputDir);
+      let iteration = 0;
+      let testOutput = '';
+      let testSuccess = false;
+      
+      // PROMPT: "Re-run the stage with currently generated files and the captured stdout and stderr in case of failure."
+      while (iteration < options.iterations && !testSuccess) {
+        if (iteration > 0) {
+          log.info(`Iteration ${iteration + 1}/${options.iterations} for prompt ${promptFile.number}`);
+        }
+        
+        const result = await processPromptFile(promptFile, options, vibecJson, testOutput);
+        testSuccess = result.success;
+        testOutput = result.output;
+        
+        if (testSuccess || !options['test-cmd']) {
+          break;
+        }
+        
+        iteration++;
+        if (iteration < options.iterations && !testSuccess) {
+          log.info(`Tests failed. Retrying with iteration ${iteration + 1}/${options.iterations}...`);
+        }
+      }
+      
+      if (!testSuccess && options['test-cmd']) {
+        log.warn(`All ${options.iterations} iterations completed without passing tests for prompt ${promptFile.number}`);
+      }
     }
     
     log.success('Processing completed successfully');
   } catch (error) {
-    log.error('Error in main execution:', error);
+    log.error('Error:', error.message);
     process.exit(1);
   }
 }
 
 // Only run main if this file is executed directly
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main(process.argv);
+  main(process.argv).catch(error => {
+    log.error('Error in main execution:', error);
+    process.exit(1);
+  });
 }

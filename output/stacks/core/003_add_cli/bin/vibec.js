@@ -5,7 +5,6 @@ import path from 'path';
 import https from 'https';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 
 /**
  * Colored logging utility
@@ -48,52 +47,12 @@ export const log = {
 };
 
 /**
- * Display help message
- */
-export async function showHelp() {
-  console.log(`
-Usage: vibec [options]
-
-Options:
-  --workdir=<dir>           Working directory (default: '.')
-  --stacks=<stack1,stack2>  Comma-separated list of stacks to process (default: 'core')
-  --dry-run                 Run without making any changes (default: false)
-  --start=<number>          Start at specific prompt number
-  --end=<number>            End at specific prompt number
-  --api-url=<url>           API URL (default: 'https://openrouter.ai/api/v1')
-  --api-key=<key>           API key (required)
-  --api-model=<model>       API model (default: 'anthropic/claude-3.7-sonnet')
-  --test-cmd=<command>      Command to run tests
-  --retries=<number>        Number of times to retry API calls (default: 0)
-  --output=<dir>            Output directory (default: 'output')
-  --help                    Show this help message
-  --version                 Show version information
-`);
-}
-
-/**
- * Display version information
- */
-export async function showVersion() {
-  try {
-    // Get package.json path relative to current file
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = dirname(__filename);
-    const packageJsonPath = path.join(__dirname, '..', 'package.json');
-    
-    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf8'));
-    console.log(`vibec v${packageJson.version || '0.0.0'}`);
-  } catch (error) {
-    console.error('Unable to determine version:', error.message);
-  }
-}
-
-/**
  * Parse command line arguments
  * @param {string[]} argv - Command line arguments
  * @returns {Object} Parsed options
  */
 export function parseArgs(argv) {
+  // PROMPT: "New CLI Options with default values"
   const options = {
     workdir: '.',
     stacks: ['core'],
@@ -105,17 +64,10 @@ export function parseArgs(argv) {
     'api-model': 'anthropic/claude-3.7-sonnet',
     'test-cmd': null,
     retries: 0,
-    output: 'output'
+    output: 'output',
+    help: false,
+    version: false
   };
-
-  // Handle special flags first
-  if (argv.includes('--help')) {
-    return { help: true, ...options };
-  }
-  
-  if (argv.includes('--version')) {
-    return { version: true, ...options };
-  }
 
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
@@ -124,18 +76,19 @@ export function parseArgs(argv) {
     if (arg.startsWith('--') && arg.includes('=')) {
       const [key, value] = arg.slice(2).split('=');
       
-      if (key === 'stacks') {
+      // PROMPT: "Handle --retries=<number> option with validation for non-negative integer"
+      if (key === 'retries') {
+        const retries = parseInt(value, 10);
+        if (isNaN(retries) || retries < 0) {
+          throw new Error(`Invalid retries value: ${value}. Must be a non-negative integer.`);
+        }
+        options[key] = retries;
+      } else if (key === 'stacks') {
         options[key] = value.split(',');
       } else if (key === 'dry-run') {
         options[key] = value.toLowerCase() !== 'false';
       } else if (key === 'start' || key === 'end') {
         options[key] = value ? parseInt(value, 10) : null;
-      } else if (key === 'retries') {
-        const retries = parseInt(value, 10);
-        if (isNaN(retries) || retries < 0) {
-          throw new Error(`Invalid value for --retries: ${value}. Must be a non-negative integer.`);
-        }
-        options[key] = retries;
       } else {
         options[key] = value;
       }
@@ -143,6 +96,12 @@ export function parseArgs(argv) {
     // Handle --option value syntax
     else if (arg.startsWith('--')) {
       const key = arg.slice(2);
+      
+      // PROMPT: "Handle --help flag"
+      if (key === 'help' || key === 'version') {
+        options[key] = true;
+        continue;
+      }
       
       if (key === 'dry-run') {
         options[key] = true;
@@ -154,16 +113,17 @@ export function parseArgs(argv) {
         const value = argv[i + 1];
         i++; // Skip the next argument since we've consumed it
         
-        if (key === 'stacks') {
+        // PROMPT: "Handle --retries <number> option with validation for non-negative integer"
+        if (key === 'retries') {
+          const retries = parseInt(value, 10);
+          if (isNaN(retries) || retries < 0) {
+            throw new Error(`Invalid retries value: ${value}. Must be a non-negative integer.`);
+          }
+          options[key] = retries;
+        } else if (key === 'stacks') {
           options[key] = value.split(',');
         } else if (key === 'start' || key === 'end') {
           options[key] = value ? parseInt(value, 10) : null;
-        } else if (key === 'retries') {
-          const retries = parseInt(value, 10);
-          if (isNaN(retries) || retries < 0) {
-            throw new Error(`Invalid value for --retries: ${value}. Must be a non-negative integer.`);
-          }
-          options[key] = retries;
         } else {
           options[key] = value;
         }
@@ -175,6 +135,47 @@ export function parseArgs(argv) {
   }
   
   return options;
+}
+
+/**
+ * Show the help message
+ */
+export function showHelp() {
+  // PROMPT: "Add --help option to show usage and exit"
+  console.log(`
+Usage: vibec [options]
+
+Options:
+  --workdir=<dir>         Working directory (default: .)
+  --stacks=<stack1,stack2> Stacks to process (default: core)
+  --dry-run               Run without making actual API calls or file changes
+  --start=<number>        Start processing from this prompt number
+  --end=<number>          End processing at this prompt number
+  --api-url=<url>         API URL (default: https://openrouter.ai/api/v1)
+  --api-key=<key>         API key for LLM service
+  --api-model=<model>     API model to use (default: anthropic/claude-3.7-sonnet)
+  --test-cmd=<command>    Command to run tests
+  --retries=<number>      Number of retries for failed LLM requests (default: 0)
+  --output=<dir>          Output directory (default: output)
+  --help                  Show this help message and exit
+  --version               Show version information and exit
+  `);
+}
+
+/**
+ * Show the version information
+ */
+export async function showVersion() {
+  // PROMPT: "Add --version option to show vibec vX.Y.Z and exit, taking version from package.json, locating it 3 levels up"
+  try {
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const packageJsonPath = path.resolve(__dirname, '..', '..', '..', 'package.json');
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf8'));
+    console.log(`vibec v${packageJson.version}`);
+  } catch (error) {
+    console.error('Error reading version information:', error.message);
+    process.exit(1);
+  }
 }
 
 /**
@@ -273,6 +274,7 @@ export async function buildPrompt(filePath, workdir, outputDir) {
     
     for (const file of contextFiles) {
       try {
+        // PROMPT: "Take output directory from options"
         const currentFilePath = path.join(workdir, outputDir, 'current', file);
         const fileContent = await fs.readFile(currentFilePath, 'utf8');
         contextContent += `\nFile: ${file}\n\`\`\`\n${fileContent}\n\`\`\`\n`;
@@ -316,19 +318,14 @@ export async function processLlm(prompt, options) {
   const apiUrl = options['api-url'];
   const apiKey = options['api-key'];
   const model = options['api-model'];
-  const maxRetries = options.retries || 0;
+  // PROMPT: "Add --retries option for retry count"
+  const maxRetries = options.retries;
 
   log.info(`Sending request to ${apiUrl} with model ${model}`);
 
-  let attempts = 0;
-  let lastError = null;
-
-  while (attempts <= maxRetries) {
+  let retries = 0;
+  while (true) {
     try {
-      if (attempts > 0) {
-        log.info(`Retry attempt ${attempts}/${maxRetries}`);
-      }
-
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -358,21 +355,18 @@ export async function processLlm(prompt, options) {
       const data = await response.json();
       return data.choices[0].message.content;
     } catch (error) {
-      lastError = error;
-      log.error(`Error processing LLM request (attempt ${attempts + 1}/${maxRetries + 1}):`, error);
-      attempts++;
-      
-      if (attempts <= maxRetries) {
-        // Wait before retrying (exponential backoff)
-        const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
-        log.info(`Waiting ${delay}ms before retry...`);
+      retries++;
+      if (retries <= maxRetries) {
+        log.warn(`Attempt ${retries}/${maxRetries} failed. Retrying...`);
+        // Add exponential backoff
+        const delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
         await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        log.error('Error processing LLM request after retries:', error);
+        throw error;
       }
     }
   }
-
-  // If we've exhausted all retries
-  throw lastError || new Error('Failed to process LLM request after all retry attempts');
 }
 
 /**
@@ -426,6 +420,7 @@ export async function runTests(testCmd) {
  */
 export async function writeFiles(files, workdir, stack, promptNumber, promptFile, outputDir) {
   const promptName = path.basename(promptFile, '.md');
+  // PROMPT: "Use custom output directory from options"
   const stackOutputDir = path.join(workdir, outputDir, 'stacks', stack, promptName);
   
   // Ensure directories exist
@@ -456,6 +451,7 @@ export async function writeFiles(files, workdir, stack, promptNumber, promptFile
  * @returns {Promise<void>}
  */
 export async function initializeOutputCurrent(workdir, outputDir) {
+  // PROMPT: "Use custom output directory from options"
   const bootstrapDir = path.join(workdir, outputDir, 'bootstrap');
   const currentDir = path.join(workdir, outputDir, 'current');
   
@@ -475,9 +471,9 @@ export async function initializeOutputCurrent(workdir, outputDir) {
     
     // Copy bootstrap files to current directory
     await copyDirectory(bootstrapDir, currentDir);
-    log.success(`Initialized ${outputDir}/current with bootstrap files`);
+    log.success('Initialized output/current with bootstrap files');
   } catch (error) {
-    log.error(`Error initializing ${outputDir}/current:`, error);
+    log.error('Error initializing output/current:', error);
     throw error;
   }
 }
@@ -533,6 +529,7 @@ export async function copyGeneratedFiles(workdir, startStage, outputDir) {
   if (!startStage) return;
 
   try {
+    // PROMPT: "Use custom output directory from options"
     const stacksDir = path.join(workdir, outputDir, 'stacks');
     const stacks = await fs.readdir(stacksDir);
 
@@ -575,9 +572,9 @@ export async function main(argv) {
     // Parse arguments
     const options = parseArgs(argv);
     
-    // Handle special options first
+    // PROMPT: "Handle --help and --version flags"
     if (options.help) {
-      await showHelp();
+      showHelp();
       return;
     }
     
@@ -601,14 +598,12 @@ export async function main(argv) {
     
     log.info(`Will process ${filteredPromptFiles.length} prompt files`);
     
-    const outputDir = options.output || 'output';
-    
     // Initialize output/current directory
-    await initializeOutputCurrent(options.workdir, outputDir);
+    await initializeOutputCurrent(options.workdir, options.output);
     
     // Copy generated files if needed
     if (options.start) {
-      await copyGeneratedFiles(options.workdir, options.start, outputDir);
+      await copyGeneratedFiles(options.workdir, options.start, options.output);
     }
     
     // Process each prompt file
@@ -616,7 +611,7 @@ export async function main(argv) {
       log.info(`Processing: ${promptFile.file} (${promptFile.number})`);
       
       // Build prompt
-      const prompt = await buildPrompt(promptFile.file, options.workdir, outputDir);
+      const prompt = await buildPrompt(promptFile.file, options.workdir, options.output);
       
       // Process with LLM
       const response = await processLlm(prompt, options);
@@ -627,7 +622,7 @@ export async function main(argv) {
       
       // Write files unless in dry-run mode
       if (!options['dry-run']) {
-        await writeFiles(files, options.workdir, promptFile.stack, promptFile.number, path.basename(promptFile.file), outputDir);
+        await writeFiles(files, options.workdir, promptFile.stack, promptFile.number, path.basename(promptFile.file), options.output);
       } else {
         log.info('Dry run mode - files not written');
       }
@@ -640,12 +635,15 @@ export async function main(argv) {
     
     log.success('Processing completed successfully');
   } catch (error) {
-    log.error('Error in main execution:', error);
+    log.error('Error:', error.message);
     process.exit(1);
   }
 }
 
 // Only run main if this file is executed directly
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main(process.argv);
+if (process.argv[1] === import.meta.url.substring('file://'.length)) {
+  main(process.argv).catch(error => {
+    log.error('Error in main execution:', error);
+    process.exit(1);
+  });
 }
