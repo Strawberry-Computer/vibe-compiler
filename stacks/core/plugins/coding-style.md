@@ -8,9 +8,3 @@
 - Don't assume any other files besides Output: and Context: exist.
 - Use ES6+ syntax with async/await and import/export.
 - Avoid dependencies on external libraries like `openai`: just use `fetch` to make HTTP requests.
-
-- Make it clear why any given code is written by adding a comment with relevant prompt snippet, like:
-    ```
-    // PROMPT: <relevant prompt snippet>
-    ```
-- Don't use any other comments.
