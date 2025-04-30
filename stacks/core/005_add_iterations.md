@@ -2,6 +2,8 @@
 
 Add support for iterations to vibec.js, allowing users to specify the number of times a stage should be executed to try to resolve test failures.
 
+When run out of iterations, fail the command.
+
 ## Config Options
 
 - `iterations`: Number, the number of times a stage should be executed to try to resolve test failures. Default: `2`.
