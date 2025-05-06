@@ -234,6 +234,8 @@ Tests in `stacks/tests/` generate:
 
 ## Tutorial: Building a Simple Pong Game
 
+This tutorial is based on a fully-functional example project available at: [github.com/Strawberry-Computer/vibe-pong](https://github.com/Strawberry-Computer/vibe-pong)
+
 ### 1. Initialize Project
 ```bash
 mkdir pong-game && cd pong-game
