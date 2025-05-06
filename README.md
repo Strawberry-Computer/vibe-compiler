@@ -4,7 +4,7 @@ A self-compiling tool that transforms prompt stacks into code and tests using LL
 
 ## Overview
 
-`vibec` is a unique compiler that processes markdown-based prompt stacks to generate code, tests, and documentation. It can compile itself through a bootstrap process, evolving its own implementation (`bin/vibec.js`) across numbered stages. The tool supports both static (`.md`) and dynamic (`.js`) plugins, maintains staged outputs in `output/stages/` for Git history, and aggregates the latest runtime version in `output/current/` using a "Last-Wins" merge strategy.
+`vibec` is a unique compiler that processes markdown-based prompt stacks to generate code, tests, and documentation. It can compile itself through a bootstrap process, evolving its own implementation (`bin/vibec.js`) across numbered stages. The tool supports both static (`.md`) and dynamic (`.js`) plugins, maintains staged outputs in `output/stacks/` for Git history, and aggregates the latest runtime version in `output/current/` using a "Last-Wins" merge strategy.
 
 ## Project Structure
 
@@ -20,6 +20,8 @@ vibec/
 │   │   ├── 002_add_plugins.md
 │   │   ├── 003_add_cli.md
 │   │   ├── 004_add_config.md
+│   │   ├── 005_add_iterations.md
+│   │   ├── 006_add_dynamic_plugins.md
 │   │   └── plugins/      # Core plugins
 │   └── tests/            # Test generation
 ├── output/               # Generated artifacts
@@ -48,6 +50,12 @@ vibec/
 │       │   ├── 004_add_config/
 │       │   │   └── bin/
 │       │   │       └── vibec.js
+│       │   ├── 005_add_iterations/
+│       │   │   └── bin/
+│       │   │       └── vibec.js
+│       │   ├── 006_add_dynamic_plugins/
+│       │   │   └── bin/
+│       │   │       └── vibec.js
 │       └── tests/     # Test stack stages
 │           ├── 001_basic_tests/
 │           │   ├── test.js
@@ -58,7 +66,6 @@ vibec/
 │           │   └── test.js
 │           └── 004_config_tests/
 │               └── test.js
-├── .vibec_hashes.json    # Prompt hashes and test results
 ├── vibec.json            # Configuration file
 └── package.json          # Node dependencies
 ```
@@ -93,7 +100,7 @@ export VIBEC_API_KEY=your_api_key_here
 
 Run with custom options:
 ```bash
-npx vibec --stacks=core,tests --test-cmd="npm test" --retries=2  --output=output
+npx vibec --stacks=core,tests --test-cmd="npm test" --retries=2 --iterations=3 --output=output
 ```
 
 CLI options:
@@ -105,7 +112,9 @@ CLI options:
 - `--api-url=<url>`: LLM API endpoint (default: `https://openrouter.ai/api/v1`)
 - `--api-model=<model>`: LLM model (default: `anthropic/claude-3.7-sonnet`)
 - `--test-cmd=<command>`: Test command to run (default: none)
-- `--retries=<number>`: Retry attempts (≥ 0, default: `0`)
+- `--retries=<number>`: Retry attempts for API calls (≥ 0, default: `0`)
+- `--iterations=<number>`: Number of times to retry a stage on test failure (> 0, default: `2`)
+- `--plugin-timeout=<ms>`: Timeout for JS plugins in milliseconds (default: `5000`)
 - `--output=<dir>`: Output directory (default: `output`)
 - `--help`: Display usage information
 - `--version`: Show version (e.g., `vibec v1.0.0`)
@@ -122,6 +131,7 @@ Configure via `vibec.json`:
   "end": null,
   "testCmd": "npm test",
   "retries": 2,
+  "iterations": 3,
   "pluginTimeout": 5000,
   "apiUrl": "https://openrouter.ai/api/v1",
   "apiModel": "anthropic/claude-3.7-sonnet",
@@ -130,8 +140,10 @@ Configure via `vibec.json`:
 ```
 
 Option precedence: CLI > Environment Variables > `vibec.json` > Defaults
+
 Validation:
 - `retries`: Must be non-negative (≥ 0)
+- `iterations`: Must be positive (> 0)
 - `pluginTimeout`: Must be positive (> 0)
 - Malformed JSON in `vibec.json` triggers an error log and falls back to defaults
 
@@ -144,7 +156,8 @@ Validation:
 - `VIBEC_END`: Numeric stage value.
 - `VIBEC_OUTPUT`: Output directory.
 - `VIBEC_TEST_CMD`: Test command
-- `VIBEC_RETRIES`: Retry count
+- `VIBEC_RETRIES`: Retry count for API calls
+- `VIBEC_ITERATIONS`: Number of times to retry a stage on test failure
 - `VIBEC_PLUGIN_TIMEOUT`: Plugin timeout (ms)
 - `VIBEC_API_URL`: LLM API endpoint
 - `VIBEC_API_KEY`: LLM API key (recommended over config)
@@ -172,15 +185,38 @@ Description of the generation task.
 
 ## Plugin System
 
-Added in stage `002_add_plugins.md`:
-- **Static Plugins (`.md`)**: Stored in `stacks/<stack>/plugins/`, appended to prompts in alphabetical order
-- **Dynamic Plugins (`.js`)**: Async functions in `stacks/<stack>/plugins/`, executed with configurable timeout:
+### Static Plugins (`.md`)
+- Stored in `stacks/<stack>/plugins/`
+- Appended to prompts in alphabetical order
+- Used for adding reusable context or constraints to prompts
+
+### Dynamic Plugins (`.js`)
+- JavaScript modules in `stacks/<stack>/plugins/`
+- Executed as async functions in alphabetical order with configurable timeout
+- Receive a context object with access to:
   ```javascript
-  module.exports = async ({ config, stack, promptNumber, promptContent, workingDir, testCmd, testResult }) => {
-    return "Generated content";
-  };
+  {
+    config,        // vibec.json contents
+    stack,         // Current stack name
+    promptNumber,  // Current prompt number
+    promptContent, // Content of the current prompt
+    workingDir,    // Path to output/current
+    testCmd,       // Test command
+    testResult     // Test execution result
+  }
   ```
 - Plugin errors are logged and skipped without halting execution
+
+## Iteration System
+
+The iteration system allows automatic refinement of generated code:
+
+1. When a test fails, the test output is captured
+2. The prompt is re-run with test output included
+3. Process repeats up to `iterations` times (default: 2)
+4. If all iterations fail, the process exits with an error
+
+This enables self-healing code generation that can fix test failures automatically.
 
 ## Development
 
@@ -260,6 +296,8 @@ Use `VIBEC_DEBUG=1 npx vibec` for detailed logs.
 - **API Key Missing**: Set `VIBEC_API_KEY`
 - **No Output**: Verify `## Output:` in prompts
 - **Command Not Found**: Use `npx vibec` or install globally
+- **Test Failures**: Check test output for details
+- **Plugin Timeout**: Increase `--plugin-timeout` if needed
 
 ## License
 
