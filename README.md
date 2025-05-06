@@ -237,56 +237,82 @@ Tests in `stacks/tests/` generate:
 ### 1. Initialize Project
 ```bash
 mkdir pong-game && cd pong-game
-mkdir -p stacks/pong output
+mkdir -p stacks/core/plugins output
 ```
 
-### 2. Define Initial Prompt
-```markdown stacks/pong/001_create_pong.md
-# Pong Game Base
+### 2. Set Up Coding Style Plugin
+Create a coding style plugin that forces the LLM to mark its reasoning in the generated code. This clever trick helps us trace which parts of the prompt produced specific code:
 
-Create a basic Pong game:
-- HTML: Canvas element in a centered container
-- CSS: Black canvas with borders
-- JS: Canvas-based paddle and ball with arrow key controls
+```markdown stacks/core/plugins/coding-style.md
+- Make it clear why any given code is written by adding a comment with relevant prompt snippet, like:
+    ```
+    // PROMPT: <relevant prompt snippet>
+    ```
+- Don't use any other comments.
+```
+
+### 3. Define Initial Prompt
+```markdown stacks/core/001_create_pong.md
+# Pong Game Initial Setup
+
+Generate a simple Pong game using HTML, CSS, and JavaScript:
+
+- Use `<canvas width="800" height="400" id="pongCanvas">` 
+- Draw a white paddle (10px wide, 100px high) at the left side of the canvas, movable up/down with arrow keys.
+- Draw a white ball (10px radius) starting at canvas center, moving diagonally with constant speed.
+- Bounce the ball off the top and side walls; reset to center if it hits the bottom (misses paddle).
+- Detect paddle collision to bounce the ball back up.
+- Use requestAnimationFrame for smooth animation.
 
 ## Output: index.html
 ## Output: styles.css
 ## Output: game.js
 ```
 
-### 3. Configure
+### 4. Configure
 ```json vibec.json
 {
-  "stacks": ["pong"],
+  "stacks": ["core"],
   "output": "output"
 }
 ```
 
-### 4. Compile
+### 5. Compile
 ```bash
 export VIBEC_API_KEY=your_api_key_here
 npx vibec
 ```
 
-### 5. Test
+### 6. Test
 ```bash
 cd output/current
 python3 -m http.server 8000
 ```
 Visit `http://localhost:8000`.
 
-### 6. Enhance
-```markdown stacks/pong/002_add_score.md
-# Pong Scoring
+### 7. Add Scoring
+```markdown stacks/core/002_add_score.md
+# Add Scoring to Pong
 
-Add scoring:
-- Display score above canvas
-- Increment when ball passes paddle, reset ball
+Enhance the Pong game by adding score display
+
+## Context: index.html, game.js
+## Output: index.html
+## Output: game.js
+```
+Run `npx vibec` again to update the game.
+
+### 8. Add AI Player
+```markdown stacks/core/003_ai_player.md
+# Add AI Player to Pong
+
+Add the computer player which moves the paddle automatically.
+Make sure that at this point there are 2 paddles: one for the user and one for the computer.
 
 ## Context: index.html, game.js
 ## Output: game.js
 ```
-Re-run `npx vibec`.
+Run `npx vibec` one more time to complete the game with an AI opponent.
 
 ### 7. Debug
 Use `VIBEC_DEBUG=1 npx vibec` for detailed logs.
